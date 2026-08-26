@@ -168,15 +168,15 @@ function kpi(label,value,hint,cls=''){return `<div class="kpi-card ${cls}"><div 
 function miniMetric(label,value){return `<div class="mini-metric"><span>${esc(label)}</span><strong>${value}</strong></div>`;}
 
 function donutChart(title,items){
-  const total=items.reduce((a,x)=>a+Number(x.value||0),0)||1;let cursor=0;const stops=[];
+  const total=items.reduce((a,x)=>a+Number(x.value||0),0);if(total<=0)return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="empty">No data</div></div>`;let cursor=0;const stops=[];
   for(const item of items){const start=cursor;cursor+=Number(item.value||0)/total*360;stops.push(`${item.color} ${start}deg ${cursor}deg`);}
   return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-hole"><strong>${qty(total)}</strong><span>positions</span></div></div><div class="chart-legend">${items.map(x=>`<div><i style="background:${x.color}"></i><span>${esc(x.label)}</span><strong>${qty(x.value)}</strong></div>`).join('')}</div></div></div>`;
 }
 function barChart(title,items,color=COLORS.neutral,formatter=qty){
-  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const pct=max?Math.max(1,Number(x.value||0)/max*100):0;return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
+  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const v=Number(x.value||0);const pct=max&&v>0?Math.max(1,v/max*100):0;return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
 }
 function trendChart(title,items,color=COLORS.receiving,formatter=qty){
-  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="trend-chart">${items.length?items.map(x=>{const h=max?Math.max(4,Number(x.value||0)/max*100):0;return `<div class="trend-col" title="${esc(x.label)}: ${esc(formatter(x.value))}"><strong>${formatter(x.value)}</strong><div class="trend-bar-wrap"><div class="trend-bar" style="height:${h}%;background:${x.color||color}"></div></div><span>${esc(x.label)}</span></div>`;}).join(''):'<div class="empty">No activity in selected period</div>'}</div></div>`;
+  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="trend-chart">${items.length?items.map(x=>{const v=Number(x.value||0);const h=max&&v>0?Math.max(4,v/max*100):0;return `<div class="trend-col" title="${esc(x.label)}: ${esc(formatter(x.value))}"><strong>${formatter(x.value)}</strong><div class="trend-bar-wrap"><div class="trend-bar" style="height:${h}%;background:${x.color||color}"></div></div><span>${esc(x.label)}</span></div>`;}).join(''):'<div class="empty">No activity in selected period</div>'}</div></div>`;
 }
 function compareChart(title,items){return barChart(title,items,COLORS.neutral,qty);}
 
@@ -212,52 +212,141 @@ function renderDataTable(host,rows,columns,opt={}){
 
 function dashboardFilterHtml(){const range=periodRange();return `<div class="period-bar"><div class="period-select"><label>Period<select id="dashPreset"><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_week">This Week</option><option value="last_7">Last 7 Days</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="custom">Custom Range</option></select></label><div id="dashCustom" class="custom-range ${state.dashboardPreset==='custom'?'':'hidden'}"><label>From<input id="dashFrom" type="date" value="${esc(range.from)}"></label><label>To<input id="dashTo" type="date" value="${esc(range.to)}"></label><button id="dashApply" class="btn">Apply</button></div></div><div class="period-caption">${dateFmt(range.from)} — ${dateFmt(range.to)}</div></div>`;}
 
+
+function ensureDashboardProStyles(){
+  if($('#dashboardProStyles'))return;
+  const s=document.createElement('style');s.id='dashboardProStyles';s.textContent=`
+    .dash-pro-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}
+    .dash-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:18px 0 9px}.dash-section-head h3{margin:0;font-size:15px}.dash-section-head span{font-size:11px;color:var(--muted)}
+    .kpi-card.blue{border-left:4px solid var(--receiving);background:linear-gradient(90deg,#eff6ff,#fff 36%)}
+    .kpi-card.purple{border-left:4px solid var(--transfer);background:linear-gradient(90deg,#eef2ff,#fff 36%)}
+    .kpi-card.neutral{border-left:4px solid var(--neutral)}
+    .attention-panel{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+    .attention-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line);background:#fff}.attention-head strong{font-size:13px}.attention-head span{font-size:11px;color:var(--muted)}
+    .attention-list{display:grid}.attention-row{display:grid;grid-template-columns:10px minmax(180px,1.6fr) minmax(180px,1fr) auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #eef2f7;font-size:11px}.attention-row:last-child{border-bottom:0}.attention-dot{width:8px;height:8px;border-radius:50%}.attention-title{font-weight:760;color:#1e293b;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-meta{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-empty{padding:20px;text-align:center;color:var(--muted);font-size:12px}
+    .dual-trend{height:215px;display:flex;gap:7px;align-items:stretch;overflow-x:auto;padding:4px 2px 0}.dual-col{min-width:52px;flex:1;display:grid;grid-template-rows:28px 1fr 34px;align-items:end;text-align:center;color:var(--muted);font-size:9px}.dual-values{display:flex;justify-content:center;gap:5px;font-size:9px;color:#475569}.dual-bars{height:100%;min-height:100px;border-bottom:1px solid #cbd5e1;display:flex;align-items:flex-end;justify-content:center;gap:4px}.dual-bar{width:min(16px,34%);border-radius:4px 4px 0 0;min-height:0}.dual-label{padding-top:6px;line-height:1.15;white-space:normal;overflow:hidden}.dual-legend{display:flex;gap:14px;align-items:center;margin:-4px 0 10px;font-size:10px;color:var(--muted)}.dual-legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+    .chart-note{font-size:10px;color:var(--muted);margin:-8px 0 10px}
+    @media(max-width:1350px){.dash-pro-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+    @media(max-width:900px){.dash-pro-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.attention-row{grid-template-columns:10px minmax(0,1fr) auto}.attention-meta{grid-column:2/4;white-space:normal}}
+    @media(max-width:620px){.dash-pro-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dash-section-head{align-items:flex-start;flex-direction:column;gap:3px}.attention-row{grid-template-columns:10px minmax(0,1fr);gap:7px}.attention-meta{grid-column:2}.attention-row .btn{grid-column:2;justify-self:start}.dual-col{min-width:48px}}
+    @media(max-width:390px){.dash-pro-kpis{grid-template-columns:1fr 1fr}.kpi-label{font-size:9px}.kpi-value{font-size:17px}}
+  `;document.head.appendChild(s);
+}
+
+function dualTrendChart(title,items,inLabel='Qty In',outLabel='Qty Out'){
+  const max=Math.max(0,...items.flatMap(x=>[Number(x.inValue||0),Number(x.outValue||0)]));
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${COLORS.waste}"></i>${esc(outLabel)}</span></div>${items.length?`<div class="dual-trend">${items.map(x=>{const iv=Number(x.inValue||0),ov=Number(x.outValue||0),ih=max&&iv>0?Math.max(3,iv/max*100):0,oh=max&&ov>0?Math.max(3,ov/max*100):0;return `<div class="dual-col" title="${esc(x.label)} · ${esc(inLabel)} ${qty(iv)} · ${esc(outLabel)} ${qty(ov)}"><div class="dual-values"><span>${qty(iv)}</span><span>${qty(ov)}</span></div><div class="dual-bars"><div class="dual-bar" style="height:${ih}%;background:${COLORS.receiving}"></div><div class="dual-bar" style="height:${oh}%;background:${COLORS.waste}"></div></div><div class="dual-label">${esc(x.label)}</div></div>`;}).join('')}</div>`:'<div class="empty">No activity in selected period</div>'}</div>`;
+}
+
+function aggregateProductPositions(rows){
+  const m=new Map();
+  for(const r of rows||[]){
+    const key=r.product_id;
+    if(!m.has(key))m.set(key,{product_id:key,product_name:r.product_name,product_code:r.product_code,category_name:r.category_name,supplier_name:r.supplier_name,quantity:0,value:0});
+    const x=m.get(key);x.quantity+=Number(r.available_quantity||0);x.value+=Number(r.stock_value||0);
+  }
+  return [...m.values()];
+}
+
+function dashboardAttentionHtml(lowRows,outRows,missingBatches,missingUnits){
+  const rows=[];
+  for(const r of lowRows)rows.push({color:COLORS.low,title:`${r.product_name} (${r.product_code})`,meta:`${qty(r.available_quantity)} PCS · reorder ${qty(r.reorder_threshold)} · ${r.supplier_name||'—'}`,page:'stock',action:'Open Stock'});
+  for(const r of outRows)rows.push({color:COLORS.out,title:`${r.product_name} (${r.product_code})`,meta:`Out of stock · reorder ${qty(r.reorder_threshold)} · ${r.supplier_name||'—'}`,page:'stock',action:'Open Stock'});
+  if(missingBatches>0)rows.push({color:COLORS.out,title:`${qty(missingBatches)} live batches missing expiry`,meta:`${qty(missingUnits)} units affected · enter only real label dates`,page:'expiry',action:'Open Expiry'});
+  return `<div class="attention-panel"><div class="attention-head"><strong>Operations Attention</strong><span>${rows.length} items requiring review</span></div>${rows.length?`<div class="attention-list">${rows.map(r=>`<div class="attention-row"><i class="attention-dot" style="background:${r.color}"></i><div class="attention-title">${esc(r.title)}</div><div class="attention-meta">${esc(r.meta)}</div><button class="btn small-btn" data-attention-page="${r.page}">${esc(r.action)}</button></div>`).join('')}</div>`:'<div class="attention-empty">No attention items in current stock.</div>'}</div>`;
+}
+
 const pages = {
   async dashboard(){
+    ensureDashboardProStyles();
     const {from,to}=periodRange();
-    const [rr,tr,wr] = await Promise.all([
-      supabase.from('v_daily_receiving_report').select('*').gte('date',from).lte('date',to),
-      supabase.from('v_daily_transfer_report').select('*').gte('date',from).lte('date',to),
-      supabase.from('v_waste_report').select('*').gte('waste_date',from).lte('waste_date',to)
-    ]);for(const q of [rr,tr,wr])if(q.error)throw q.error;
-    const receiving=rr.data||[],transfers=tr.data||[],waste=wr.data||[];
-    const wh=state.positions.filter(x=>x.branch_name==='Warehouse');const shops=state.positions.filter(x=>x.branch_name!=='Warehouse');
+    const [rr,tr,wr,mr] = await Promise.all([
+      supabase.from('v_daily_receiving_report').select('date,receiving_id,supplier_name,quantity,total_cost').gte('date',from).lte('date',to).order('date',{ascending:true}),
+      supabase.from('v_daily_transfer_report').select('date,transfer_id,to_branch,quantity,total_value').gte('date',from).lte('date',to).order('date',{ascending:true}),
+      supabase.from('v_waste_report').select('id,waste_date,quantity,waste_value').gte('waste_date',from).lte('waste_date',to).order('waste_date',{ascending:true}),
+      supabase.from('v_stock_movement_ledger').select('transaction_date,transaction_key,quantity_in,quantity_out,movement_value').gte('transaction_date',from).lte('transaction_date',to).order('transaction_date',{ascending:true}).limit(5000)
+    ]);
+    for(const q of [rr,tr,wr,mr])if(q.error)throw q.error;
+    const receiving=rr.data||[],transfers=tr.data||[],waste=wr.data||[],movements=mr.data||[];
+    const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
+    const shops=state.positions.filter(x=>x.branch_name!=='Warehouse');
     const whUnits=sum(wh,'available_quantity'),whValue=sum(wh,'stock_value'),whSku=distinctCount(wh.filter(x=>Number(x.available_quantity)>0),'product_id');
     const shopUnits=sum(shops,'available_quantity'),shopValue=sum(shops,'stock_value'),shopSku=distinctCount(shops.filter(x=>Number(x.available_quantity)>0),'product_id');
-    const totalValue=whValue+shopValue;const zeroWh=wh.filter(x=>Number(x.available_quantity)<=0).length;const lowWh=wh.filter(x=>x.stock_status==='Low Stock').length;const outWh=wh.filter(x=>x.stock_status==='Out of Stock').length;
-    const expSoon=state.expiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=7).length;
+    const totalValue=whValue+shopValue;
+    const lowWh=wh.filter(x=>x.stock_status==='Low Stock').sort((a,b)=>Number(a.available_quantity)-Number(b.available_quantity));
+    const outWh=wh.filter(x=>x.stock_status==='Out of Stock').sort((a,b)=>String(a.product_name).localeCompare(String(b.product_name)));
     const recvUnits=sum(receiving,'quantity'),recvValue=sum(receiving,'total_cost'),recvTxn=distinctCount(receiving,'receiving_id');
     const trUnits=sum(transfers,'quantity'),trValue=sum(transfers,'total_value'),trTxn=distinctCount(transfers,'transfer_id');
-    const wasteUnits=sum(waste,'quantity'),wasteValue=sum(waste,'waste_value');
-    const health=[{label:'Healthy',value:wh.filter(x=>x.stock_status==='Healthy').length,color:COLORS.healthy},{label:'Low Stock',value:lowWh,color:COLORS.low},{label:'Out of Stock',value:outWh,color:COLORS.out}];
-    const top10=[...wh].filter(x=>Number(x.available_quantity)>0).sort((a,b)=>Number(b.available_quantity)-Number(a.available_quantity)).slice(0,10).map(x=>({label:x.product_name,value:Number(x.available_quantity)}));
+    const wasteUnits=sum(waste,'quantity'),wasteValue=sum(waste,'waste_value'),wasteTxn=distinctCount(waste,'id');
+    const movementTxn=distinctCount(movements,'transaction_key');
+    const liveExpiry=state.expiry.filter(x=>Number(x.remaining_quantity)>0);
+    const missingExpiry=liveExpiry.filter(x=>!x.expiry_date);
+    const missingExpiryBatches=missingExpiry.length,missingExpiryUnits=sum(missingExpiry,'remaining_quantity');
+    const expSoon=liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=7).length;
+
+    const health=[
+      {label:'Healthy',value:wh.filter(x=>x.stock_status==='Healthy').length,color:COLORS.healthy},
+      {label:'Low Stock',value:lowWh.length,color:COLORS.low},
+      {label:'Out of Stock',value:outWh.length,color:COLORS.out}
+    ];
+
+    const productTotals=aggregateProductPositions(state.positions);
+    const topValue=[...productTotals].filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,10).map(x=>({label:x.product_name,value:x.value}));
+    const topQty=[...productTotals].filter(x=>x.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,10).map(x=>({label:x.product_name,value:x.quantity}));
     const catUnits=groupSum(state.positions,'category_name','available_quantity').sort((a,b)=>b.value-a.value);
     const catValue=groupSum(state.positions,'category_name','stock_value').sort((a,b)=>b.value-a.value);
-    const supplierRecv=groupSum(receiving,'supplier_name','total_cost').sort((a,b)=>b.value-a.value).slice(0,8);
+    const supplierValue=groupSum(state.positions,'supplier_name','stock_value').sort((a,b)=>b.value-a.value);
+    const supplierRecv=groupSum(receiving,'supplier_name','total_cost').sort((a,b)=>b.value-a.value);
     const branchTr=groupSum(transfers,'to_branch','quantity').sort((a,b)=>b.value-a.value).map(x=>({...x,label:locationName(x.label)}));
-    const expiryOrder=['Expired','Expires Today','Within 3 Days','Within 7 Days','Within 14 Days','Safe','No Expiry Date'];const expCounts=expiryOrder.map(s=>({label:s,value:state.expiry.filter(x=>x.expiry_status===s|| (s==='Safe'&&x.expiry_status==='OK')).length,color:s==='Expired'||s==='Expires Today'?COLORS.waste:s==='Within 3 Days'?COLORS.out:s.includes('Within')?COLORS.low:s==='Safe'?COLORS.healthy:COLORS.neutral})).filter(x=>x.value);
-    content.innerHTML=`${dashboardFilterHtml()}<div class="quick-actions"><button class="btn primary" id="quickReceive">＋ Receive</button><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn" id="quickAdjust">± Adjustment</button><button class="btn" id="quickWaste">♲ Waste</button></div>
-      <div class="kpi-grid kpi-grid-5">
-        ${kpi('Bakery Warehouse Available Stock',qty(whUnits),`${money(whValue)} · ${whSku} available SKUs`)}
-        ${kpi('Total Stock in Jeddah Shops',qty(shopUnits),`${money(shopValue)} · ${shopSku} available SKUs`)}
-        ${kpi('Total Inventory Value',money(totalValue),'All active physical locations')}
-        ${kpi('Bakery Warehouse Stock Positions',qty(wh.length),`${zeroWh} zero-stock positions`)}
+    const recvTrend=aggregateTrend(receiving,'date','quantity',from,to);
+    const wasteTrend=aggregateTrend(waste,'waste_date','quantity',from,to);
+
+    const movementMap=new Map();
+    for(const r of movements){const d=String(r.transaction_date||'').slice(0,10);if(!d)continue;if(!movementMap.has(d))movementMap.set(d,{date:d,inValue:0,outValue:0});const x=movementMap.get(d);x.inValue+=Number(r.quantity_in||0);x.outValue+=Number(r.quantity_out||0);}
+    const long=rangeDays(from,to)>62;
+    let movementTrend=[...movementMap.values()].sort((a,b)=>a.date.localeCompare(b.date));
+    if(long){const mm=new Map();for(const r of movementTrend){const k=monthKey(r.date);if(!mm.has(k))mm.set(k,{label:`${k.slice(5,7)}/${k.slice(0,4)}`,inValue:0,outValue:0});const x=mm.get(k);x.inValue+=r.inValue;x.outValue+=r.outValue;}movementTrend=[...mm.values()];}
+    else movementTrend=movementTrend.map(x=>({label:dateFmt(x.date),inValue:x.inValue,outValue:x.outValue}));
+
+    const expiryRisk=[
+      {label:'Missing Expiry',value:missingExpiryBatches,color:COLORS.neutral},
+      {label:'Expired',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)<0).length,color:COLORS.waste},
+      {label:'0–3 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=3).length,color:COLORS.out},
+      {label:'4–7 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=4&&Number(x.days_until_expiry)<=7).length,color:COLORS.low},
+      {label:'8–14 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=8&&Number(x.days_until_expiry)<=14).length,color:COLORS.low},
+      {label:'Safe >14 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>14).length,color:COLORS.healthy}
+    ].filter(x=>x.value>0);
+
+    content.innerHTML=`${dashboardFilterHtml()}
+      <div class="quick-actions"><button class="btn primary" id="quickReceive">＋ Receive</button><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn" id="quickAdjust">± Adjustment</button><button class="btn" id="quickWaste">♲ Waste</button></div>
+      <div class="dash-pro-kpis">
+        ${kpi('Bakery Warehouse Stock',qty(whUnits),`${money(whValue)} · ${whSku} available SKUs`,'good')}
+        ${kpi('Total Inventory Value',money(totalValue),'All active physical locations','neutral')}
+        ${kpi('Jeddah Shops Stock',qty(shopUnits),`${money(shopValue)} · ${shopSku} available SKUs`)}
         ${kpi('Receiving in Selected Period',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
         ${kpi('Transferred to Jeddah Shops',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
-        ${kpi('Low Stock Alerts',qty(lowWh),'Bakery Warehouse thresholds','warn')}
-        ${kpi('Out of Stock',qty(outWh),'Bakery Warehouse positions','bad')}
-        ${kpi('Expiring Soon',qty(expSoon),'Batches within 7 days','warn')}
-        ${kpi('Waste in Selected Period',qty(wasteUnits),money(wasteValue),'bad')}
+        ${kpi('Low Stock Alerts',qty(lowWh.length),'Bakery Warehouse thresholds','warn')}
+        ${kpi('Out of Stock',qty(outWh.length),'Bakery Warehouse products','bad')}
+        ${kpi('Missing Expiry',qty(missingExpiryBatches),`${qty(missingExpiryUnits)} units affected`,'bad')}
+        ${kpi('Expiring ≤7 Days',qty(expSoon),'Live dated batches','warn')}
+        ${kpi('Waste in Selected Period',qty(wasteUnits),`${wasteTxn} records · ${money(wasteValue)}`,'bad')}
       </div>
-      <div class="section-title"><h3>Stock Health</h3><span>Bakery Warehouse</span></div><div class="chart-grid">${donutChart('Stock Health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
-      <div class="chart-grid">${barChart('Top 10 Products by Available Quantity',top10,COLORS.neutral,qty)}${barChart('Stock by Category',catUnits,COLORS.neutral,qty)}</div>
-      <div class="chart-grid">${barChart('Inventory Value by Category',catValue,COLORS.neutral,money)}${trendChart('Receiving Trend',aggregateTrend(receiving,'date','quantity',from,to),COLORS.receiving,qty)}</div>
-      <div class="chart-grid">${trendChart('Transfer Trend',aggregateTrend(transfers,'date','quantity',from,to),COLORS.transfer,qty)}${compareChart('Receiving vs Transfers',[{label:'Receiving',value:recvUnits,color:COLORS.receiving},{label:'Transfers',value:trUnits,color:COLORS.transfer}])}</div>
-      <div class="chart-grid">${barChart('Supplier Receiving Summary',supplierRecv,COLORS.receiving,money)}${barChart('Destination Branch Transfer Summary',branchTr,COLORS.transfer,qty)}</div>
-      <div class="chart-grid">${barChart('Expiry Risk',expCounts,COLORS.low,qty)}${trendChart('Waste Trend',aggregateTrend(waste,'waste_date','quantity',from,to),COLORS.waste,qty)}</div>`;
-    $('#dashPreset').value=state.dashboardPreset;$('#dashPreset').onchange=e=>{state.dashboardPreset=e.target.value;$('#dashCustom').classList.toggle('hidden',e.target.value!=='custom');if(e.target.value!=='custom')go('dashboard');};
+      ${dashboardAttentionHtml(lowWh,outWh,missingExpiryBatches,missingExpiryUnits)}
+      <div class="dash-section-head"><h3>Stock & Valuation</h3><span>Live positions across active physical locations</span></div>
+      <div class="chart-grid">${donutChart('Bakery Warehouse Stock Health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
+      <div class="chart-grid">${barChart('Stock Units by Category',catUnits,COLORS.neutral,qty)}${barChart('Stock Value by Category',catValue,COLORS.neutral,money)}</div>
+      <div class="chart-grid">${barChart('Stock Value by Supplier',supplierValue,COLORS.neutral,money)}${barChart('Top 10 Products by Stock Value',topValue,COLORS.neutral,money)}</div>
+      <div class="chart-grid">${barChart('Top 10 Products by Quantity',topQty,COLORS.neutral,qty)}${barChart('Expiry Risk — Live Batches',expiryRisk,COLORS.low,qty)}</div>
+      <div class="dash-section-head"><h3>Selected Period Activity</h3><span>${dateFmt(from)} — ${dateFmt(to)} · ${movementTxn} source transactions</span></div>
+      <div class="chart-grid">${trendChart('Receiving Trend — Units',recvTrend,COLORS.receiving,qty)}${dualTrendChart('Inventory Movement Trend',movementTrend,'Qty In','Qty Out')}</div>
+      <div class="chart-grid">${barChart('Supplier Receiving Value',supplierRecv,COLORS.receiving,money)}${barChart('Transfer Destination — Units',branchTr,COLORS.transfer,qty)}</div>
+      <div class="chart-grid">${trendChart('Waste Trend — Units',wasteTrend,COLORS.waste,qty)}${compareChart('Receiving vs Transfers — Units',[{label:'Receiving',value:recvUnits,color:COLORS.receiving},{label:'Transfers',value:trUnits,color:COLORS.transfer}])}</div>`;
+
+    $('#dashPreset').value=state.dashboardPreset;
+    $('#dashPreset').onchange=e=>{state.dashboardPreset=e.target.value;$('#dashCustom').classList.toggle('hidden',e.target.value!=='custom');if(e.target.value!=='custom')go('dashboard');};
     if($('#dashApply'))$('#dashApply').onclick=()=>{const f=$('#dashFrom').value,t=$('#dashTo').value;if(!f||!t||f>t)return toast('Choose a valid custom date range','error');state.dashboardCustom={from:f,to:t};state.dashboardPreset='custom';go('dashboard');};
     $('#quickReceive').onclick=openReceiving;$('#quickTransfer').onclick=openTransfer;$('#quickAdjust').onclick=openAdjustment;$('#quickWaste').onclick=openWaste;
+    $$('[data-attention-page]').forEach(b=>b.onclick=()=>go(b.dataset.attentionPage));
   },
 
   async stock(){
