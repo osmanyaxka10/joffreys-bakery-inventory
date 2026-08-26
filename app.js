@@ -1,0 +1,417 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = 'https://ivqygskesdrretwgouea.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_f4Jv-1y826TQkpRbVYAeEg_91xKWGSx';
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+});
+
+const $ = (s, root=document) => root.querySelector(s);
+const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+const content = $('#content');
+const authView = $('#authView');
+const appView = $('#appView');
+const modal = $('#modal');
+const modalBody = $('#modalBody');
+
+const state = {
+  session: null,
+  appUser: null,
+  currentPage: 'dashboard',
+  products: [],
+  allProducts: [],
+  suppliers: [],
+  branches: [],
+  warehouse: null,
+  positions: [],
+  expiry: [],
+  cache: {},
+  dashboardPreset: 'this_month',
+  dashboardCustom: null
+};
+
+const navItems = [
+  ['dashboard','▦','Dashboard'],
+  ['stock','▤','Stock'],
+  ['movements','≋','Movements'],
+  ['receiving','↓','Receiving'],
+  ['transfers','⇄','Transfers'],
+  ['adjustments','±','Adjustments'],
+  ['waste','♲','Waste'],
+  ['expiry','◷','Expiry'],
+  ['reports','▥','Reports'],
+  ['suppliers','♟','Suppliers'],
+  ['products','□','Products']
+];
+
+const pageMeta = {
+  dashboard:['Dashboard','Live management view from Supabase'],
+  stock:['Stock','Current stock positions by product and location'],
+  movements:['Movements','Read-only inventory audit ledger'],
+  receiving:['Receiving','Multi-line supplier receiving'],
+  transfers:['Transfers','Bakery Warehouse to active destination branches'],
+  adjustments:['Adjustments','Controlled corrections and physical counts'],
+  waste:['Waste','Expired, damaged and unsellable inventory'],
+  expiry:['Expiry','Batch expiry risk and FEFO visibility'],
+  reports:['Reports','Daily, monthly and management reporting'],
+  suppliers:['Suppliers','Supplier activity using real data'],
+  products:['Products','Real Supabase product master']
+};
+
+const COLORS = {
+  healthy:'#15803d', low:'#d97706', out:'#ea580c', receiving:'#2563eb', transfer:'#4f46e5', waste:'#dc2626', neutral:'#475569', safe:'#16a34a'
+};
+
+function esc(v=''){return String(v ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function num(v,d=0){const n=Number(v||0);return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function qty(v){const n=Number(v||0);return num(n,Number.isInteger(n)?0:2);}
+function money(v){return `SAR ${num(v,2)}`;}
+function isoToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function isoDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function dateFmt(v){if(!v)return '—';const s=String(v).slice(0,10);const [y,m,d]=s.split('-');return y&&m&&d?`${d}/${m}/${y}`:esc(v);}
+function dateTimeFmt(v){if(!v)return '—';const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+function locationName(name){return String(name||'')==='Warehouse'?'Bakery Warehouse':String(name||'');}
+function displayMovement(v){return String(v||'').replaceAll('_',' ');}
+function sum(rows,key){return (rows||[]).reduce((a,r)=>a+Number(r[key]||0),0);}
+function distinctCount(rows,key){return new Set((rows||[]).map(r=>r[key]).filter(v=>v!==null&&v!==undefined)).size;}
+function groupSum(rows,key,valueKey){const m=new Map();for(const r of rows||[]){const k=r[key]??'Unspecified';m.set(k,(m.get(k)||0)+Number(r[valueKey]||0));}return [...m.entries()].map(([label,value])=>({label,value}));}
+function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className=`toast show ${type}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='toast',4200);}
+function setLoading(msg='Loading…'){content.innerHTML=`<div class="panel loading">${esc(msg)}</div>`;}
+function fail(error,context='Request failed'){console.error(error);toast(`${context}: ${error?.message||error}`,'error');}
+function newPostingKey(){return crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;}
+function statusBadge(s){const x=String(s||'—');const l=x.toLowerCase();let c='neutral';if(l.includes('healthy')||l==='safe'||l==='ok')c='good';else if(l.includes('low')||l.includes('within 7')||l.includes('within 14'))c='warn';else if(l.includes('out')||l.includes('expired')||l.includes('today')||l.includes('within 3'))c='bad';return `<span class="badge ${c}">${esc(x)}</span>`;}
+function activeRole(){return String(state.appUser?.role||'').toLowerCase();}
+function canPost(){return ['admin','bakery incharge','warehouse staff'].includes(activeRole());}
+
+function periodRange(preset=state.dashboardPreset, custom=state.dashboardCustom){
+  const now=new Date(); now.setHours(0,0,0,0);
+  let from=new Date(now),to=new Date(now);
+  if(preset==='yesterday'){from.setDate(from.getDate()-1);to=new Date(from);}
+  else if(preset==='this_week'){const day=(now.getDay()+6)%7;from.setDate(now.getDate()-day);}
+  else if(preset==='last_7'){from.setDate(now.getDate()-6);}
+  else if(preset==='this_month'){from=new Date(now.getFullYear(),now.getMonth(),1);}
+  else if(preset==='last_month'){from=new Date(now.getFullYear(),now.getMonth()-1,1);to=new Date(now.getFullYear(),now.getMonth(),0);}
+  else if(preset==='custom'&&custom?.from&&custom?.to){return {from:custom.from,to:custom.to};}
+  return {from:isoDate(from),to:isoDate(to)};
+}
+function rangeDays(from,to){return Math.max(1,Math.round((new Date(to)-new Date(from))/864e5)+1);}
+function monthKey(v){return String(v||'').slice(0,7);}
+function aggregateTrend(rows,dateKey,valueKey,from,to){
+  const long=rangeDays(from,to)>62;const m=new Map();
+  for(const r of rows||[]){const k=long?monthKey(r[dateKey]):String(r[dateKey]||'').slice(0,10);m.set(k,(m.get(k)||0)+Number(r[valueKey]||0));}
+  return [...m.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([label,value])=>({label:long?`${label.slice(5,7)}/${label.slice(0,4)}`:dateFmt(label),value}));
+}
+
+async function requireData(force=false){
+  if(!force&&state.products.length&&state.branches.length&&state.suppliers.length&&state.positions.length)return;
+  const [p,allp,s,b,pos,exp] = await Promise.all([
+    supabase.from('products').select('id,ref_no,product_code,name,category,category_id,unit,unit_price,unit_cost,low_stock_alert,reorder_level,minimum_stock,maximum_stock,is_active,supplier_id').eq('is_active',true).order('name'),
+    supabase.from('products').select('id,ref_no,product_code,name,category,category_id,unit,unit_price,unit_cost,low_stock_alert,reorder_level,minimum_stock,maximum_stock,is_active,supplier_id').order('name'),
+    supabase.from('suppliers').select('*').order('name'),
+    supabase.from('branches').select('*').order('name'),
+    supabase.from('v_stock_positions').select('*'),
+    supabase.from('v_expiry_alerts').select('*')
+  ]);
+  for(const q of [p,allp,s,b,pos,exp])if(q.error)throw q.error;
+  state.products=p.data||[];state.allProducts=allp.data||[];state.suppliers=s.data||[];state.branches=(b.data||[]).filter(x=>x.is_active);state.positions=pos.data||[];state.expiry=exp.data||[];
+  state.warehouse=state.branches.find(x=>String(x.name).toLowerCase()==='warehouse')||null;
+}
+
+async function loadAppUser(){
+  const {data,error}=await supabase.from('app_users').select('id,name,email,role,branch_id,is_active').eq('auth_user_id',state.session.user.id).maybeSingle();
+  if(error)throw error;if(!data||!data.is_active)throw new Error('Your inventory account is not active');state.appUser=data;
+  $('#userCard').innerHTML=`<strong>${esc(data.name)}</strong><span>${esc(data.role)}</span><small>${esc(data.email||state.session.user.email||'')}</small>`;
+}
+
+function renderNav(){
+  $('#nav').innerHTML=navItems.map(([id,ico,label])=>`<button data-page="${id}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
+  $$('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.page));
+}
+
+async function go(page,throwOnError=false){
+  state.currentPage=page;renderNav();$('#sidebar').classList.remove('open');
+  const meta=pageMeta[page]||['Inventory',''];$('#pageTitle').textContent=meta[0];$('#pageSubtitle').textContent=meta[1];setLoading();
+  try{await requireData();await pages[page]();return true;}catch(e){if(throwOnError)throw e;fail(e);content.innerHTML=`<div class="panel"><h3>Unable to load ${esc(meta[0])}</h3><p class="muted">${esc(e.message)}</p></div>`;return false;}
+}
+
+function kpi(label,value,hint,cls=''){return `<div class="kpi-card ${cls}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value??'—'}</div><div class="kpi-hint">${esc(hint||'')}</div></div>`;}
+function miniMetric(label,value){return `<div class="mini-metric"><span>${esc(label)}</span><strong>${value}</strong></div>`;}
+
+function donutChart(title,items){
+  const total=items.reduce((a,x)=>a+Number(x.value||0),0)||1;let cursor=0;const stops=[];
+  for(const item of items){const start=cursor;cursor+=Number(item.value||0)/total*360;stops.push(`${item.color} ${start}deg ${cursor}deg`);}
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-hole"><strong>${qty(total)}</strong><span>positions</span></div></div><div class="chart-legend">${items.map(x=>`<div><i style="background:${x.color}"></i><span>${esc(x.label)}</span><strong>${qty(x.value)}</strong></div>`).join('')}</div></div></div>`;
+}
+function barChart(title,items,color=COLORS.neutral,formatter=qty){
+  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const pct=max?Math.max(1,Number(x.value||0)/max*100):0;return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
+}
+function trendChart(title,items,color=COLORS.receiving,formatter=qty){
+  const max=Math.max(0,...items.map(x=>Number(x.value||0)));return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="trend-chart">${items.length?items.map(x=>{const h=max?Math.max(4,Number(x.value||0)/max*100):0;return `<div class="trend-col" title="${esc(x.label)}: ${esc(formatter(x.value))}"><strong>${formatter(x.value)}</strong><div class="trend-bar-wrap"><div class="trend-bar" style="height:${h}%;background:${x.color||color}"></div></div><span>${esc(x.label)}</span></div>`;}).join(''):'<div class="empty">No activity in selected period</div>'}</div></div>`;
+}
+function compareChart(title,items){return barChart(title,items,COLORS.neutral,qty);}
+
+function tableCell(v,col){
+  if(col.render)return col.render(v,col._row);
+  if(col.type==='money')return money(v);if(col.type==='qty')return qty(v);if(col.type==='date')return dateFmt(v);if(col.type==='datetime')return dateTimeFmt(v);if(col.type==='badge')return statusBadge(v);if(col.type==='movement')return esc(displayMovement(v));if(col.type==='location')return esc(locationName(v));
+  return esc(v??'—');
+}
+function exportRowsCsv(rows,columns,filename){
+  const q=v=>`"${String(v??'').replaceAll('"','""')}"`;const lines=[columns.map(c=>q(c.label)).join(',')];
+  for(const r of rows)lines.push(columns.map(c=>q(rawExportValue(r[c.key],c))).join(','));downloadBlob(lines.join('\n'),'text/csv;charset=utf-8',`${filename}.csv`);
+}
+function rawExportValue(v,c){if(c.type==='date')return dateFmt(v);if(c.type==='datetime')return dateTimeFmt(v);if(c.type==='money')return Number(v||0).toFixed(2);if(c.type==='location')return locationName(v);if(c.type==='movement')return displayMovement(v);return v??'';}
+function exportRowsExcel(rows,columns,filename){
+  const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</table></body></html>`;downloadBlob(html,'application/vnd.ms-excel',`${filename}.xls`);
+}
+function downloadBlob(text,type,name){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function printRows(rows,columns,title){
+  const w=window.open('','_blank','noopener,noreferrer');if(!w)return toast('Allow pop-ups to print','error');
+  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial;padding:20px;color:#111}h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#eee}@media print{body{padding:0}}</style></head><body><h1>${esc(title)}</h1><p>Generated ${dateTimeFmt(new Date().toISOString())}</p><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close();
+}
+
+function renderDataTable(host,rows,columns,opt={}){
+  const el=typeof host==='string'?$(host):host;const pageSize=opt.pageSize||50;const filters=opt.filters||[];let page=1,sortKey=opt.sortKey||'',sortDir=opt.sortDir||'asc';
+  const filterValues=Object.fromEntries(filters.map(f=>[f.key,[...new Set(rows.map(r=>r[f.key]).filter(v=>v!==null&&v!==undefined&&v!==''))].sort()]));
+  el.innerHTML=`<div class="table-card"><div class="table-toolbar"><div class="table-filter"><input data-search placeholder="Search SKU, product, reference…">${filters.map(f=>`<select data-filter="${esc(f.key)}"><option value="">All ${esc(f.label)}</option>${filterValues[f.key].map(v=>`<option value="${esc(v)}">${esc(f.type==='location'?locationName(v):v)}</option>`).join('')}</select>`).join('')}</div><div class="table-actions"><button class="btn small-btn" data-csv>CSV</button><button class="btn small-btn" data-xls>Excel</button><button class="btn small-btn" data-print>Print</button></div></div><div class="table-meta"><span data-count></span><div class="pager"><button class="btn small-btn" data-prev>‹</button><span data-page></span><button class="btn small-btn" data-next>›</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr>${columns.map(c=>`<th data-sort="${esc(c.key)}" class="${c.align==='right'?'num':''}">${esc(c.label)} <span class="sortmark"></span></th>`).join('')}</tr></thead><tbody></tbody></table></div></div>`;
+  const tbody=$('tbody',el),search=$('[data-search]',el),count=$('[data-count]',el),pageLabel=$('[data-page]',el);
+  const getFiltered=()=>{const q=(search.value||'').trim().toLowerCase();const active=Object.fromEntries($$('[data-filter]',el).map(s=>[s.dataset.filter,s.value]));let out=rows.filter(r=>(!q||columns.some(c=>String(rawExportValue(r[c.key],c)).toLowerCase().includes(q)))&&Object.entries(active).every(([k,v])=>!v||String(r[k]??'')===v));if(sortKey){const col=columns.find(c=>c.key===sortKey);out=[...out].sort((a,b)=>{const av=a[sortKey],bv=b[sortKey];let d;if(['money','qty'].includes(col?.type))d=Number(av||0)-Number(bv||0);else d=String(av??'').localeCompare(String(bv??''),undefined,{numeric:true});return sortDir==='asc'?d:-d;});}return out;};
+  const draw=()=>{const filtered=getFiltered();const pages=Math.max(1,Math.ceil(filtered.length/pageSize));if(page>pages)page=pages;const slice=filtered.slice((page-1)*pageSize,page*pageSize);count.textContent=`${filtered.length} rows`;pageLabel.textContent=`Page ${page} / ${pages}`;tbody.innerHTML=slice.length?slice.map(r=>`<tr>${columns.map(c=>{const cc={...c,_row:r};return `<td class="${c.align==='right'?'num':''}">${tableCell(r[c.key],cc)}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${columns.length}" class="empty">No records found</td></tr>`;$('[data-prev]',el).disabled=page<=1;$('[data-next]',el).disabled=page>=pages;$$('th[data-sort]',el).forEach(th=>{const mark=$('.sortmark',th);mark.textContent=th.dataset.sort===sortKey?(sortDir==='asc'?'▲':'▼'):'';});};
+  search.oninput=()=>{page=1;draw();};$$('[data-filter]',el).forEach(s=>s.onchange=()=>{page=1;draw();});$('[data-prev]',el).onclick=()=>{page--;draw();};$('[data-next]',el).onclick=()=>{page++;draw();};$$('th[data-sort]',el).forEach(th=>th.onclick=()=>{const k=th.dataset.sort;if(sortKey===k)sortDir=sortDir==='asc'?'desc':'asc';else{sortKey=k;sortDir='asc';}draw();});
+  $('[data-csv]',el).onclick=()=>exportRowsCsv(getFiltered(),columns,opt.filename||'joffreys-report');$('[data-xls]',el).onclick=()=>exportRowsExcel(getFiltered(),columns,opt.filename||'joffreys-report');$('[data-print]',el).onclick=()=>printRows(getFiltered(),columns,opt.title||'Joffrey’s Bakery Report');draw();
+}
+
+function dashboardFilterHtml(){const range=periodRange();return `<div class="period-bar"><div class="period-select"><label>Period<select id="dashPreset"><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_week">This Week</option><option value="last_7">Last 7 Days</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="custom">Custom Range</option></select></label><div id="dashCustom" class="custom-range ${state.dashboardPreset==='custom'?'':'hidden'}"><label>From<input id="dashFrom" type="date" value="${esc(range.from)}"></label><label>To<input id="dashTo" type="date" value="${esc(range.to)}"></label><button id="dashApply" class="btn">Apply</button></div></div><div class="period-caption">${dateFmt(range.from)} — ${dateFmt(range.to)}</div></div>`;}
+
+const pages = {
+  async dashboard(){
+    const {from,to}=periodRange();
+    const [rr,tr,wr] = await Promise.all([
+      supabase.from('v_daily_receiving_report').select('*').gte('date',from).lte('date',to),
+      supabase.from('v_daily_transfer_report').select('*').gte('date',from).lte('date',to),
+      supabase.from('v_waste_report').select('*').gte('waste_date',from).lte('waste_date',to)
+    ]);for(const q of [rr,tr,wr])if(q.error)throw q.error;
+    const receiving=rr.data||[],transfers=tr.data||[],waste=wr.data||[];
+    const wh=state.positions.filter(x=>x.branch_name==='Warehouse');const shops=state.positions.filter(x=>x.branch_name!=='Warehouse');
+    const whUnits=sum(wh,'available_quantity'),whValue=sum(wh,'stock_value'),whSku=distinctCount(wh.filter(x=>Number(x.available_quantity)>0),'product_id');
+    const shopUnits=sum(shops,'available_quantity'),shopValue=sum(shops,'stock_value'),shopSku=distinctCount(shops.filter(x=>Number(x.available_quantity)>0),'product_id');
+    const totalValue=whValue+shopValue;const zeroWh=wh.filter(x=>Number(x.available_quantity)<=0).length;const lowWh=wh.filter(x=>x.stock_status==='Low Stock').length;const outWh=wh.filter(x=>x.stock_status==='Out of Stock').length;
+    const expSoon=state.expiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=7).length;
+    const recvUnits=sum(receiving,'quantity'),recvValue=sum(receiving,'total_cost'),recvTxn=distinctCount(receiving,'receiving_id');
+    const trUnits=sum(transfers,'quantity'),trValue=sum(transfers,'total_value'),trTxn=distinctCount(transfers,'transfer_id');
+    const wasteUnits=sum(waste,'quantity'),wasteValue=sum(waste,'waste_value');
+    const health=[{label:'Healthy',value:wh.filter(x=>x.stock_status==='Healthy').length,color:COLORS.healthy},{label:'Low Stock',value:lowWh,color:COLORS.low},{label:'Out of Stock',value:outWh,color:COLORS.out}];
+    const top10=[...wh].filter(x=>Number(x.available_quantity)>0).sort((a,b)=>Number(b.available_quantity)-Number(a.available_quantity)).slice(0,10).map(x=>({label:x.product_name,value:Number(x.available_quantity)}));
+    const catUnits=groupSum(state.positions,'category_name','available_quantity').sort((a,b)=>b.value-a.value);
+    const catValue=groupSum(state.positions,'category_name','stock_value').sort((a,b)=>b.value-a.value);
+    const supplierRecv=groupSum(receiving,'supplier_name','total_cost').sort((a,b)=>b.value-a.value).slice(0,8);
+    const branchTr=groupSum(transfers,'to_branch','quantity').sort((a,b)=>b.value-a.value).map(x=>({...x,label:locationName(x.label)}));
+    const expiryOrder=['Expired','Expires Today','Within 3 Days','Within 7 Days','Within 14 Days','Safe','No Expiry Date'];const expCounts=expiryOrder.map(s=>({label:s,value:state.expiry.filter(x=>x.expiry_status===s|| (s==='Safe'&&x.expiry_status==='OK')).length,color:s==='Expired'||s==='Expires Today'?COLORS.waste:s==='Within 3 Days'?COLORS.out:s.includes('Within')?COLORS.low:s==='Safe'?COLORS.healthy:COLORS.neutral})).filter(x=>x.value);
+    content.innerHTML=`${dashboardFilterHtml()}<div class="quick-actions"><button class="btn primary" id="quickReceive">＋ Receive</button><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn" id="quickAdjust">± Adjustment</button><button class="btn" id="quickWaste">♲ Waste</button></div>
+      <div class="kpi-grid kpi-grid-5">
+        ${kpi('Bakery Warehouse Available Stock',qty(whUnits),`${money(whValue)} · ${whSku} available SKUs`)}
+        ${kpi('Total Stock in Jeddah Shops',qty(shopUnits),`${money(shopValue)} · ${shopSku} available SKUs`)}
+        ${kpi('Total Inventory Value',money(totalValue),'All active physical locations')}
+        ${kpi('Bakery Warehouse Stock Positions',qty(wh.length),`${zeroWh} zero-stock positions`)}
+        ${kpi('Receiving in Selected Period',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
+        ${kpi('Transferred to Jeddah Shops',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
+        ${kpi('Low Stock Alerts',qty(lowWh),'Bakery Warehouse thresholds','warn')}
+        ${kpi('Out of Stock',qty(outWh),'Bakery Warehouse positions','bad')}
+        ${kpi('Expiring Soon',qty(expSoon),'Batches within 7 days','warn')}
+        ${kpi('Waste in Selected Period',qty(wasteUnits),money(wasteValue),'bad')}
+      </div>
+      <div class="section-title"><h3>Stock Health</h3><span>Bakery Warehouse</span></div><div class="chart-grid">${donutChart('Stock Health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
+      <div class="chart-grid">${barChart('Top 10 Products by Available Quantity',top10,COLORS.neutral,qty)}${barChart('Stock by Category',catUnits,COLORS.neutral,qty)}</div>
+      <div class="chart-grid">${barChart('Inventory Value by Category',catValue,COLORS.neutral,money)}${trendChart('Receiving Trend',aggregateTrend(receiving,'date','quantity',from,to),COLORS.receiving,qty)}</div>
+      <div class="chart-grid">${trendChart('Transfer Trend',aggregateTrend(transfers,'date','quantity',from,to),COLORS.transfer,qty)}${compareChart('Receiving vs Transfers',[{label:'Receiving',value:recvUnits,color:COLORS.receiving},{label:'Transfers',value:trUnits,color:COLORS.transfer}])}</div>
+      <div class="chart-grid">${barChart('Supplier Receiving Summary',supplierRecv,COLORS.receiving,money)}${barChart('Destination Branch Transfer Summary',branchTr,COLORS.transfer,qty)}</div>
+      <div class="chart-grid">${barChart('Expiry Risk',expCounts,COLORS.low,qty)}${trendChart('Waste Trend',aggregateTrend(waste,'waste_date','quantity',from,to),COLORS.waste,qty)}</div>`;
+    $('#dashPreset').value=state.dashboardPreset;$('#dashPreset').onchange=e=>{state.dashboardPreset=e.target.value;$('#dashCustom').classList.toggle('hidden',e.target.value!=='custom');if(e.target.value!=='custom')go('dashboard');};
+    if($('#dashApply'))$('#dashApply').onclick=()=>{const f=$('#dashFrom').value,t=$('#dashTo').value;if(!f||!t||f>t)return toast('Choose a valid custom date range','error');state.dashboardCustom={from:f,to:t};state.dashboardPreset='custom';go('dashboard');};
+    $('#quickReceive').onclick=openReceiving;$('#quickTransfer').onclick=openTransfer;$('#quickAdjust').onclick=openAdjustment;$('#quickWaste').onclick=openWaste;
+  },
+
+  async stock(){
+    const rows=state.positions.map(r=>({...r,location_display:locationName(r.branch_name)}));
+    content.innerHTML=`<div id="stockTable"></div>`;
+    renderDataTable('#stockTable',rows,[
+      {key:'product_code',label:'SKU / Reference'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'supplier_name',label:'Supplier'},
+      {key:'branch_name',label:'Location',type:'location'},{key:'available_quantity',label:'Available Quantity',type:'qty',align:'right'},{key:'unit',label:'Unit'},
+      {key:'reorder_threshold',label:'Reorder Threshold',type:'qty',align:'right'},{key:'stock_status',label:'Stock Scale / Status',type:'badge'},
+      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'stock_value',label:'Stock Value',type:'money',align:'right'},{key:'expiry_status',label:'Expiry Status',type:'badge'}
+    ],{filters:[{key:'category_name',label:'Category'},{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'},{key:'stock_status',label:'Status'}],filename:'joffreys-current-stock',title:'Joffrey’s Bakery Current Stock',pageSize:50,sortKey:'product_name'});
+  },
+
+  async movements(){
+    const {data,error}=await supabase.from('v_stock_movement_ledger').select('*').order('created_at',{ascending:false}).limit(5000);if(error)throw error;
+    content.innerHTML=`<div class="period-inline"><label>From<input id="mFrom" type="date"></label><label>To<input id="mTo" type="date"></label><button id="mApply" class="btn">Apply Date Filter</button><button id="mClear" class="btn ghost">Clear</button></div><div id="movementTable"></div>`;
+    const render=(rows)=>renderDataTable('#movementTable',rows,[
+      {key:'created_at',label:'Date / Time',type:'datetime'},{key:'movement_type',label:'Movement Type',type:'movement'},{key:'reference_no',label:'Reference'},
+      {key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'},
+      {key:'quantity_in',label:'Quantity In',type:'qty',align:'right'},{key:'quantity_out',label:'Quantity Out',type:'qty',align:'right'},{key:'running_balance',label:'Resulting Balance',type:'qty',align:'right'},
+      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'movement_value',label:'Value',type:'money',align:'right'},{key:'performed_by',label:'Performed By'},{key:'notes',label:'Notes'}
+    ],{filters:[{key:'movement_type',label:'Movement Type'},{key:'branch_name',label:'Branch',type:'location'}],filename:'joffreys-movement-ledger',title:'Joffrey’s Bakery Movement Ledger',pageSize:75});
+    render(data||[]);$('#mApply').onclick=()=>{const f=$('#mFrom').value,t=$('#mTo').value;if(f&&t&&f>t)return toast('Invalid date range','error');const rows=(data||[]).filter(r=>(!f||String(r.created_at).slice(0,10)>=f)&&(!t||String(r.created_at).slice(0,10)<=t));render(rows);};$('#mClear').onclick=()=>{$('#mFrom').value='';$('#mTo').value='';render(data||[]);};
+  },
+
+  async receiving(){
+    const {data,error}=await supabase.from('v_daily_receiving_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newReceiving" ${canPost()?'':'disabled'}>＋ New Receiving</button></div><div id="receivingTable"></div>`;$('#newReceiving').onclick=openReceiving;
+    renderDataTable('#receivingTable',data||[],[
+      {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Receiving Reference'},{key:'invoice_no',label:'Invoice Number'},{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Receiving Location',type:'location'},
+      {key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'unit',label:'Unit'},{key:'quantity',label:'Quantity',type:'qty',align:'right'},
+      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'total_cost',label:'Line Value',type:'money',align:'right'},{key:'expiry_date',label:'Expiry Date',type:'date'},{key:'batch_no',label:'Batch'},{key:'performed_by',label:'Performed By'}
+    ],{filters:[{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'}],filename:'joffreys-daily-receiving',title:'Joffrey’s Bakery Receiving Report',pageSize:50});
+  },
+
+  async transfers(){
+    const {data,error}=await supabase.from('v_daily_transfer_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newTransfer" ${canPost()?'':'disabled'}>⇄ New Transfer</button></div><div id="transferTable"></div>`;$('#newTransfer').onclick=openTransfer;
+    renderDataTable('#transferTable',data||[],[
+      {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Transfer Reference'},{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'},
+      {key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'unit',label:'Unit'},{key:'quantity',label:'Quantity',type:'qty',align:'right'},
+      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'total_value',label:'Total Value',type:'money',align:'right'},{key:'performed_by',label:'Performed By'}
+    ],{filters:[{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'}],filename:'joffreys-daily-transfers',title:'Joffrey’s Bakery Transfer Report',pageSize:50});
+  },
+
+  async adjustments(){
+    const {data,error}=await supabase.from('v_adjustment_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newAdjustment" ${canPost()?'':'disabled'}>± New Adjustment</button></div><div id="adjustTable"></div>`;$('#newAdjustment').onclick=openAdjustment;
+    renderDataTable('#adjustTable',data||[],[
+      {key:'adjustment_date',label:'Date',type:'date'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},
+      {key:'quantity_in',label:'Adjustment +',type:'qty',align:'right'},{key:'quantity_out',label:'Adjustment -',type:'qty',align:'right'},{key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'adjustment_value',label:'Value',type:'money',align:'right'},
+      {key:'reason',label:'Reason'},{key:'performed_by',label:'Performed By'},{key:'notes',label:'Notes'}
+    ],{filters:[{key:'branch_name',label:'Location',type:'location'},{key:'reason',label:'Reason'}],filename:'joffreys-adjustments',title:'Joffrey’s Bakery Adjustment Report',pageSize:50});
+  },
+
+  async waste(){
+    const {data,error}=await supabase.from('v_waste_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newWaste" ${canPost()?'':'disabled'}>♲ Record Waste</button></div><div id="wasteTable"></div>`;$('#newWaste').onclick=openWaste;
+    renderDataTable('#wasteTable',data||[],[
+      {key:'waste_date',label:'Date',type:'date'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},
+      {key:'quantity',label:'Quantity',type:'qty',align:'right'},{key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'waste_value',label:'Waste Value',type:'money',align:'right'},
+      {key:'reason',label:'Reason'},{key:'expiry_date',label:'Expiry Date',type:'date'},{key:'performed_by',label:'Performed By'},{key:'notes',label:'Notes'}
+    ],{filters:[{key:'branch_name',label:'Location',type:'location'},{key:'reason',label:'Reason'}],filename:'joffreys-waste',title:'Joffrey’s Bakery Waste Report',pageSize:50});
+  },
+
+  async expiry(){
+    const rows=state.expiry.map(x=>({...x,branch_display:locationName(x.branch_name)}));const counts={};for(const r of rows)counts[r.expiry_status]=(counts[r.expiry_status]||0)+1;
+    content.innerHTML=`<div class="kpi-grid kpi-grid-6">${kpi('Expired',qty(counts['Expired']||0),'Immediate action','bad')}${kpi('Expires Today',qty(counts['Expires Today']||0),'Critical','bad')}${kpi('Within 3 Days',qty(counts['Within 3 Days']||0),'High risk','warn')}${kpi('Within 7 Days',qty(counts['Within 7 Days']||0),'Plan movement','warn')}${kpi('Within 14 Days',qty(counts['Within 14 Days']||0),'Monitor','warn')}${kpi('Safe',qty(counts['Safe']||counts['OK']||0),'Beyond 14 days','good')}</div><div id="expiryTable" style="margin-top:16px"></div>`;
+    renderDataTable('#expiryTable',rows,[
+      {key:'product_name',label:'Product'},{key:'product_code',label:'SKU'},{key:'batch_no',label:'Batch'},{key:'branch_name',label:'Location',type:'location'},{key:'remaining_quantity',label:'Quantity Remaining',type:'qty',align:'right'},
+      {key:'received_date',label:'Received Date',type:'date'},{key:'expiry_date',label:'Expiry Date',type:'date'},{key:'days_until_expiry',label:'Days Remaining',type:'qty',align:'right'},{key:'supplier_name',label:'Supplier'},{key:'expiry_status',label:'Status',type:'badge'}
+    ],{filters:[{key:'expiry_status',label:'Expiry Status'},{key:'branch_name',label:'Location',type:'location'},{key:'supplier_name',label:'Supplier'}],filename:'joffreys-expiry',title:'Joffrey’s Bakery Expiry / FEFO Report',pageSize:50,sortKey:'expiry_date'});
+  },
+
+  async reports(){renderReportsShell();},
+
+  async suppliers(){
+    const {data,error}=await supabase.from('v_supplier_summary_report').select('*').order('supplier_name');if(error)throw error;
+    content.innerHTML=`<div id="supplierTable"></div>`;renderDataTable('#supplierTable',data||[],[
+      {key:'supplier_name',label:'Supplier'},{key:'is_active',label:'Status',render:v=>statusBadge(v?'Active':'Inactive')},{key:'active_products',label:'Active Products',type:'qty',align:'right'},
+      {key:'contact_name',label:'Contact'},{key:'phone',label:'Phone'},{key:'email',label:'Email'},{key:'total_received_units',label:'Total Received',type:'qty',align:'right'},
+      {key:'total_receiving_value',label:'Receiving Value',type:'money',align:'right'},{key:'latest_receiving_date',label:'Latest Receiving',type:'date'}
+    ],{filters:[{key:'is_active',label:'Status'}],filename:'joffreys-suppliers',title:'Joffrey’s Bakery Supplier Summary',pageSize:50});
+  },
+
+  async products(){
+    const supplierMap=Object.fromEntries(state.suppliers.map(x=>[x.id,x.name]));
+    const rows=state.allProducts.map(p=>({...p,supplier_name:supplierMap[p.supplier_id]||'—',reorder_threshold:Math.max(Number(p.low_stock_alert||0),Number(p.reorder_level||0),Number(p.minimum_stock||0))}));
+    content.innerHTML=`<div class="info-banner">Product IDs and SKUs are protected by history. This page is read-only; use deactivation rather than deletion for master-data changes.</div><div id="productTable"></div>`;
+    renderDataTable('#productTable',rows,[
+      {key:'product_code',label:'SKU'},{key:'name',label:'Product Name'},{key:'category',label:'Category'},{key:'supplier_name',label:'Supplier'},{key:'unit',label:'Unit'},
+      {key:'unit_price',label:'Selling Price',type:'money',align:'right'},{key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'reorder_threshold',label:'Reorder Threshold',type:'qty',align:'right'},
+      {key:'is_active',label:'Status',render:v=>statusBadge(v?'Active':'Inactive')}
+    ],{filters:[{key:'supplier_name',label:'Supplier'},{key:'category',label:'Category'},{key:'is_active',label:'Status'}],filename:'joffreys-products',title:'Joffrey’s Bakery Product Master',pageSize:50});
+  }
+};
+
+function productOptions(){return state.products.map(p=>`<option value="${p.id}">${esc(p.product_code||p.ref_no)} — ${esc(p.name)}</option>`).join('');}
+function supplierOptions(){return state.suppliers.filter(s=>s.is_active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');}
+function branchOptions(excludeWarehouse=false){return state.branches.filter(b=>!excludeWarehouse||b.id!==state.warehouse?.id).map(b=>`<option value="${b.id}">${esc(locationName(b.name))}</option>`).join('');}
+function openModal(title,subtitle,body,size='normal'){$('#modalTitle').textContent=title;$('#modalSubtitle').textContent=subtitle||'';modalBody.innerHTML=body;modal.className=`modal ${size}`;modal.showModal();}
+function closeModal(){if(modal.open)modal.close();modalBody.innerHTML='';modal.className='modal';}
+
+function receivingLineHtml(){return `<div class="erp-line" data-line><label class="pick"><input type="checkbox" class="line-check"><span></span></label><label class="product-cell">Product<select class="li-product" required><option value="">Select product</option>${productOptions()}</select><small class="li-meta">Category · Unit</small></label><label>Qty<input class="li-qty" type="number" min="0.01" step="0.01" required></label><label>Unit Cost<input class="li-cost" type="number" min="0" step="0.01" required></label><label>Line Value<input class="li-value" readonly></label><label>Expiry<input class="li-expiry" type="date"></label><label>Batch<input class="li-batch" placeholder="Optional"></label><label class="notes-cell">Notes<input class="li-note" placeholder="Optional"></label><button type="button" class="line-remove" title="Remove">✕</button></div>`;}
+function transferLineHtml(){return `<div class="erp-line transfer-line" data-line><label class="pick"><input type="checkbox" class="line-check"><span></span></label><label class="product-cell">Product<select class="li-product" required><option value="">Select product</option>${productOptions()}</select><small class="li-meta">Category · Unit</small></label><label>Available<input class="li-available" readonly></label><label>Qty to Transfer<input class="li-qty" type="number" min="0.01" step="0.01" required></label><label>Unit Cost<input class="li-cost" readonly></label><label>Total Value<input class="li-value" readonly></label><label class="notes-cell">Notes<input class="li-note" placeholder="Optional"></label><button type="button" class="line-remove" title="Remove">✕</button></div>`;}
+
+function bindReceivingLines(container){
+  $$('[data-line]',container).forEach(row=>{if(row.dataset.bound)return;row.dataset.bound='1';const sel=$('.li-product',row),q=$('.li-qty',row),cost=$('.li-cost',row),value=$('.li-value',row),meta=$('.li-meta',row);$('.line-remove',row).onclick=()=>{if($$('[data-line]',container).length>1)row.remove();};const calc=()=>value.value=money(Number(q.value||0)*Number(cost.value||0));sel.onchange=()=>{const p=state.products.find(x=>String(x.id)===sel.value);if(p){cost.value=Number(p.unit_cost||0).toFixed(2);meta.textContent=`${p.category||'Uncategorized'} · ${p.unit||'PCS'}`;}calc();};q.oninput=calc;cost.oninput=calc;});
+}
+function bindTransferLines(container,stockMap){
+  $$('[data-line]',container).forEach(row=>{if(row.dataset.bound)return;row.dataset.bound='1';const sel=$('.li-product',row),q=$('.li-qty',row),cost=$('.li-cost',row),value=$('.li-value',row),available=$('.li-available',row),meta=$('.li-meta',row);$('.line-remove',row).onclick=()=>{if($$('[data-line]',container).length>1)row.remove();};const calc=()=>value.value=money(Number(q.value||0)*Number(cost.value||0));sel.onchange=()=>{const p=state.products.find(x=>String(x.id)===sel.value),pos=stockMap.get(Number(sel.value));if(p){cost.value=Number(p.unit_cost||0).toFixed(2);meta.textContent=`${p.category||'Uncategorized'} · ${p.unit||'PCS'}`;}available.value=qty(pos?.available_quantity||0);calc();};q.oninput=calc;});
+}
+function validateUniqueProducts(rows){const ids=rows.map(r=>Number($('.li-product',r)?.value)).filter(Boolean);if(new Set(ids).size!==ids.length)throw new Error('Duplicate product line');}
+function calculateReceiving(container){for(const row of $$('[data-line]',container)){const q=Number($('.li-qty',row).value||0),c=Number($('.li-cost',row).value||0);$('.li-value',row).value=money(q*c);}}
+function calculateTransfer(container){for(const row of $$('[data-line]',container)){const q=Number($('.li-qty',row).value||0),c=Number($('.li-cost',row).value||0);$('.li-value',row).value=money(q*c);}}
+
+async function saveLocked(form,action,handler){
+  if(form.dataset.saving==='1')return;form.dataset.saving='1';const buttons=$$('[data-save]',form);const originals=buttons.map(b=>b.textContent);buttons.forEach(b=>{b.disabled=true;b.textContent='Saving…';});
+  try{await handler(action);}catch(e){fail(e,'Could not save');}finally{form.dataset.saving='0';buttons.forEach((b,i)=>{b.disabled=false;b.textContent=originals[i];});}
+}
+async function afterTransactionSaved(page,message,action,newFn){
+  toast(message,'success');closeModal();if(action==='new'){newFn();return;}
+  try{await requireData(true);await go(page,true);}catch(e){console.error(e);toast('Transaction saved, but refresh failed. Do not save it again.','warn');}
+}
+
+function openReceiving(){
+  if(!canPost())return toast('Your role cannot post receiving','error');const postingKey=newPostingKey();
+  openModal('New Receiving','Multi-line supplier receiving. Inventory posts atomically in Supabase.',`<form id="receiveForm"><div class="form-grid grid-3-form"><label>Receiving Reference<input id="rRef" required placeholder="e.g. REC-260826-01"></label><label>Receiving Date<input id="rDate" type="date" required value="${isoToday()}"></label><label>Supplier<select id="rSupplier" required><option value="">Select supplier</option>${supplierOptions()}</select></label><label>Invoice Number<input id="rInvoice" placeholder="Optional invoice number"></label><label>Receiving Location<select id="rBranch" required>${branchOptions()}</select></label><label class="span-3">Notes<textarea id="rNotes" placeholder="Optional receiving notes"></textarea></label></div><div class="line-toolbar"><button id="rAdd" type="button" class="btn">＋ Add Product</button><button id="rDelete" type="button" class="btn">Delete Selected</button><button id="rCalc" type="button" class="btn">Calculate</button></div><div class="line-scroll"><div id="receiveLines" class="erp-lines">${receivingLineHtml()}</div></div><div class="form-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn" data-save data-action="new">Save & New</button><button type="submit" class="btn primary" data-save data-action="save">Save</button></div></form>`,'wide');
+  const form=$('#receiveForm'),lines=$('#receiveLines');$('#rBranch').value=state.warehouse?.id||state.branches[0]?.id||'';bindReceivingLines(lines);$('#rAdd').onclick=()=>{lines.insertAdjacentHTML('beforeend',receivingLineHtml());bindReceivingLines(lines);};$('#rDelete').onclick=()=>{$$('.line-check:checked',lines).forEach(c=>{if($$('[data-line]',lines).length>1)c.closest('[data-line]').remove();});};$('#rCalc').onclick=()=>calculateReceiving(lines);$('[data-cancel]',form).onclick=closeModal;
+  form.onsubmit=e=>{e.preventDefault();const action=e.submitter?.dataset.action||'save';saveLocked(form,action,async()=>{const rows=$$('[data-line]',lines);validateUniqueProducts(rows);const items=rows.map(row=>({product_id:Number($('.li-product',row).value),quantity:Number($('.li-qty',row).value),unit_cost:Number($('.li-cost',row).value),expiry_date:$('.li-expiry',row).value||null,batch_no:$('.li-batch',row).value.trim()||null,notes:$('.li-note',row).value.trim()||null}));if(items.some(x=>!x.product_id||x.quantity<=0||x.unit_cost<0))throw new Error('Invalid receiving line quantity or cost');const {data,error}=await supabase.rpc('post_receiving',{p_received_date:$('#rDate').value,p_reference_no:$('#rRef').value.trim(),p_invoice_no:$('#rInvoice').value.trim()||null,p_supplier_id:Number($('#rSupplier').value),p_branch_id:Number($('#rBranch').value),p_items:items,p_notes:$('#rNotes').value.trim()||null,p_posting_key:postingKey});if(error)throw error;await afterTransactionSaved('receiving',`Receiving ${data.reference_no||'#'+data.id} saved${data.duplicate?' (already posted)':''}`,action,openReceiving);});};
+}
+
+function openTransfer(){
+  if(!canPost())return toast('Your role cannot post transfers','error');if(!state.warehouse)return toast('Bakery Warehouse is not configured','error');const postingKey=newPostingKey();const whRows=state.positions.filter(x=>x.branch_id===state.warehouse.id);const stockMap=new Map(whRows.map(x=>[x.product_id,x]));
+  openModal('New Transfer','FEFO transfer from Bakery Warehouse to one active physical branch.',`<form id="transferForm"><div class="form-grid grid-3-form"><label>Transfer Reference<input id="tRef" required placeholder="e.g. TRF-260826-01"></label><label>Date<input id="tDate" type="date" required value="${isoToday()}"></label><label>From Location<input value="Bakery Warehouse" readonly></label><label>To Location<select id="tTo" required><option value="">Select destination</option>${branchOptions(true)}</select></label><label class="span-2">Notes<textarea id="tNotes" placeholder="Optional transfer notes"></textarea></label></div><div class="line-toolbar"><button id="tAdd" type="button" class="btn">＋ Add Product</button><button id="tDelete" type="button" class="btn">Delete Selected</button><button id="tCalc" type="button" class="btn">Calculate</button></div><div class="line-scroll"><div id="transferLines" class="erp-lines">${transferLineHtml()}</div></div><div class="form-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn" data-save data-action="new">Save & New</button><button type="submit" class="btn primary" data-save data-action="save">Save</button></div></form>`,'wide');
+  const form=$('#transferForm'),lines=$('#transferLines');bindTransferLines(lines,stockMap);$('#tAdd').onclick=()=>{lines.insertAdjacentHTML('beforeend',transferLineHtml());bindTransferLines(lines,stockMap);};$('#tDelete').onclick=()=>{$$('.line-check:checked',lines).forEach(c=>{if($$('[data-line]',lines).length>1)c.closest('[data-line]').remove();});};$('#tCalc').onclick=()=>calculateTransfer(lines);$('[data-cancel]',form).onclick=closeModal;
+  form.onsubmit=e=>{e.preventDefault();const action=e.submitter?.dataset.action||'save';saveLocked(form,action,async()=>{const rows=$$('[data-line]',lines);validateUniqueProducts(rows);const items=rows.map(row=>{const product_id=Number($('.li-product',row).value),quantity=Number($('.li-qty',row).value),available=Number(stockMap.get(product_id)?.available_quantity||0);if(quantity>available)throw new Error(`Insufficient stock for ${state.products.find(p=>p.id===product_id)?.name||'product'}: available ${qty(available)}`);return {product_id,quantity,notes:$('.li-note',row).value.trim()||null};});if(items.some(x=>!x.product_id||x.quantity<=0))throw new Error('Invalid transfer line quantity');const {data,error}=await supabase.rpc('post_transfer',{p_transfer_date:$('#tDate').value,p_reference_no:$('#tRef').value.trim(),p_to_branch_id:Number($('#tTo').value),p_items:items,p_notes:$('#tNotes').value.trim()||null,p_posting_key:postingKey});if(error)throw error;await afterTransactionSaved('transfers',`Transfer ${data.reference_no||'#'+data.id} saved${data.duplicate?' (already posted)':''}`,action,openTransfer);});};
+}
+
+function openAdjustment(){
+  if(!canPost())return toast('Your role cannot post adjustments','error');const postingKey=newPostingKey();
+  openModal('New Adjustment','Use a signed quantity correction or enter a physical count.',`<form id="adjustForm"><div class="form-grid"><label>Date<input id="aDate" type="date" required value="${isoToday()}"></label><label>Location<select id="aBranch" required>${branchOptions()}</select></label><label class="full">Product<select id="aProduct" required><option value="">Select product</option>${productOptions()}</select></label><label>Current System Quantity<input id="aCurrent" readonly></label><label>Mode<select id="aMode"><option value="DELTA">Quantity Adjustment (+/-)</option><option value="PHYSICAL_COUNT">Physical Count</option></select></label><label id="aQtyLabel">Adjustment Quantity (+/-)<input id="aQty" type="number" step="0.01" required></label><label>Reason<select id="aReason" required><option>Physical Count</option><option>Damage</option><option>System Correction</option><option>Opening Balance</option><option>Other</option></select></label><label class="full">Notes<textarea id="aNotes"></textarea></label></div><div class="form-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn" data-save data-action="new">Save & New</button><button type="submit" class="btn primary" data-save data-action="save">Save</button></div></form>`);
+  const form=$('#adjustForm');$('[data-cancel]',form).onclick=closeModal;const refreshCurrent=()=>{const p=Number($('#aProduct').value),b=Number($('#aBranch').value),pos=state.positions.find(x=>x.product_id===p&&x.branch_id===b);$('#aCurrent').value=qty(pos?.available_quantity||0);};$('#aProduct').onchange=refreshCurrent;$('#aBranch').onchange=refreshCurrent;$('#aMode').onchange=()=>{$('#aQtyLabel').firstChild.textContent=$('#aMode').value==='PHYSICAL_COUNT'?'Physical Count':'Adjustment Quantity (+/-)';};
+  form.onsubmit=e=>{e.preventDefault();const action=e.submitter?.dataset.action||'save';saveLocked(form,action,async()=>{const mode=$('#aMode').value,q=Number($('#aQty').value);if(mode==='DELTA'&&q===0)throw new Error('Adjustment quantity cannot be zero');if(mode==='PHYSICAL_COUNT'&&q<0)throw new Error('Physical count cannot be negative');const {data,error}=await supabase.rpc('post_adjustment',{p_adjustment_date:$('#aDate').value,p_product_id:Number($('#aProduct').value),p_branch_id:Number($('#aBranch').value),p_mode:mode,p_quantity:q,p_reason:$('#aReason').value,p_notes:$('#aNotes').value.trim()||null,p_posting_key:postingKey});if(error)throw error;await afterTransactionSaved('adjustments',`Adjustment #${data.id} saved · difference ${qty(data.difference)}`,action,openAdjustment);});};
+}
+
+async function openWaste(){
+  if(!canPost())return toast('Your role cannot post waste','error');const postingKey=newPostingKey();
+  openModal('Record Waste','Waste reduces available stock and consumes batches using FEFO.',`<form id="wasteForm"><div class="form-grid"><label>Date<input id="wDate" type="date" required value="${isoToday()}"></label><label>Location<select id="wBranch" required>${branchOptions()}</select></label><label class="full">Product<select id="wProduct" required><option value="">Select product</option>${productOptions()}</select></label><label>Available Quantity<input id="wAvailable" readonly></label><label>Quantity<input id="wQty" type="number" min="0.01" step="0.01" required></label><label>Reason<select id="wReason" required><option>Expired</option><option>Damaged</option><option>Quality Issue</option><option>Production Waste</option><option>Returned/Unsellable</option><option>Other</option></select></label><label>Batch / Expiry<select id="wBatch"><option value="">FEFO automatically</option></select></label><label class="full">Notes<textarea id="wNotes"></textarea></label></div><div class="form-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn" data-save data-action="new">Save & New</button><button type="submit" class="btn primary" data-save data-action="save">Save</button></div></form>`);
+  const form=$('#wasteForm');$('[data-cancel]',form).onclick=closeModal;const refresh=()=>{const p=Number($('#wProduct').value),b=Number($('#wBranch').value),pos=state.positions.find(x=>x.product_id===p&&x.branch_id===b);$('#wAvailable').value=qty(pos?.available_quantity||0);const batches=state.expiry.filter(x=>x.product_id===p&&x.branch_id===b).sort((a,c)=>String(a.expiry_date||'9999').localeCompare(String(c.expiry_date||'9999')));$('#wBatch').innerHTML='<option value="">FEFO automatically</option>'+batches.map(x=>`<option value="${esc(x.expiry_date||'')}|${esc(x.batch_no||'')}">${esc(x.batch_no||'No batch')} · ${dateFmt(x.expiry_date)} · ${qty(x.remaining_quantity)} PCS</option>`).join('');};$('#wProduct').onchange=refresh;$('#wBranch').onchange=refresh;
+  form.onsubmit=e=>{e.preventDefault();const action=e.submitter?.dataset.action||'save';saveLocked(form,action,async()=>{const p=Number($('#wProduct').value),b=Number($('#wBranch').value),q=Number($('#wQty').value),available=Number(state.positions.find(x=>x.product_id===p&&x.branch_id===b)?.available_quantity||0);if(q<=0)throw new Error('Invalid quantity');if(q>available)throw new Error(`Waste quantity exceeds available stock (${qty(available)})`);const expiry=$('#wBatch').value?$('#wBatch').value.split('|')[0]||null:null;const {data,error}=await supabase.rpc('post_waste',{p_waste_date:$('#wDate').value,p_product_id:p,p_branch_id:b,p_quantity:q,p_reason:$('#wReason').value,p_expiry_date:expiry,p_notes:$('#wNotes').value.trim()||null,p_posting_key:postingKey});if(error)throw error;await afterTransactionSaved('waste',`Waste #${data.id} saved`,action,openWaste);});};
+}
+
+function renderReportsShell(){
+  const r=periodRange('this_month');content.innerHTML=`<div class="report-controls"><label>Report<select id="reportType"><option value="current_stock">Current Stock Report</option><option value="valuation">Stock Valuation Report</option><option value="daily_receiving">Daily Receiving Report</option><option value="daily_transfer">Daily Transfer Report</option><option value="daily_movement">Daily Movement Report</option><option value="daily_waste">Daily Waste Report</option><option value="monthly_receiving">Monthly Receiving Summary</option><option value="monthly_transfer">Monthly Transfer Summary</option><option value="monthly_movement">Monthly Movement Summary</option><option value="monthly_waste">Monthly Waste Summary</option><option value="warehouse_shops">Bakery Warehouse vs Jeddah Shops</option><option value="supplier_summary">Supplier Summary</option><option value="category_summary">Category Summary</option><option value="low_stock">Low Stock Report</option><option value="out_stock">Out of Stock Report</option><option value="expiry">Expiry Report</option><option value="product_history">Product Movement History</option><option value="branch_transfer">Branch Transfer Summary</option><option value="adjustment">Stock Adjustment Report</option></select></label><label>From<input id="reportFrom" type="date" value="${r.from}"></label><label>To<input id="reportTo" type="date" value="${r.to}"></label><button id="runReport" class="btn primary">Run Report</button></div><div id="reportResult" class="report-result"><div class="panel empty">Choose a report and click Run Report.</div></div>`;$('#runReport').onclick=runReport;
+}
+async function runReport(){
+  const type=$('#reportType').value,from=$('#reportFrom').value,to=$('#reportTo').value;if(from&&to&&from>to)return toast('Invalid report date range','error');const host=$('#reportResult');host.innerHTML='<div class="panel loading">Running report…</div>';
+  try{const result=await reportDefinition(type,from,to);host.innerHTML=`<div class="report-head"><h3>${esc(result.title)}</h3><span>${from&&to?`${dateFmt(from)} — ${dateFmt(to)}`:'Current data'}</span></div>${result.summary||''}${result.sections.map((s,i)=>`<section class="report-section"><h4>${esc(s.title||result.title)}</h4><div id="reportSection${i}"></div></section>`).join('')}`;result.sections.forEach((s,i)=>renderDataTable(`#reportSection${i}`,s.rows,s.columns,{filters:s.filters||[],filename:s.filename||`joffreys-${type}-${i+1}`,title:s.title||result.title,pageSize:s.pageSize||50}));}catch(e){fail(e,'Report failed');host.innerHTML=`<div class="panel"><p>${esc(e.message)}</p></div>`;}
+}
+function monthAggregate(rows,dateKey,txnKey,qtyKey,valueKey){const m=new Map();for(const r of rows){const k=monthKey(r[dateKey]);if(!m.has(k))m.set(k,{month:k,txn:new Set(),lines:0,units:0,value:0});const x=m.get(k);x.txn.add(r[txnKey]??r.id);x.lines++;x.units+=Number(r[qtyKey]||0);x.value+=Number(r[valueKey]||0);}return [...m.values()].sort((a,b)=>a.month.localeCompare(b.month)).map(x=>({month:x.month,transactions:x.txn.size,line_count:x.lines,units:x.units,value:x.value}));}
+async function reportDefinition(type,from,to){
+  const cols={stock:[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'},{key:'available_quantity',label:'Quantity',type:'qty',align:'right'},{key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'stock_value',label:'Value',type:'money',align:'right'},{key:'stock_status',label:'Status',type:'badge'}]};
+  if(type==='current_stock')return {title:'Current Stock Report',sections:[{rows:state.positions,columns:cols.stock,filters:[{key:'branch_name',label:'Location',type:'location'},{key:'category_name',label:'Category'},{key:'supplier_name',label:'Supplier'}]}]};
+  if(type==='valuation')return {title:'Stock Valuation Report',summary:`<div class="kpi-grid kpi-grid-3">${kpi('Total Units',qty(sum(state.positions,'available_quantity')),'All active locations')}${kpi('Inventory Value',money(sum(state.positions,'stock_value')),'At product unit cost')}${kpi('Active Positions',qty(state.positions.filter(x=>Number(x.available_quantity)>0).length),'Product/location positions')}</div>`,sections:[{rows:state.positions,columns:cols.stock,filters:[{key:'branch_name',label:'Location',type:'location'},{key:'category_name',label:'Category'}]}]};
+  if(type==='daily_receiving'||type==='monthly_receiving'){const {data,error}=await supabase.from('v_daily_receiving_report').select('*').gte('date',from).lte('date',to);if(error)throw error;const rows=data||[];const detailCols=[{key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Reference'},{key:'invoice_no',label:'Invoice'},{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'unit_cost',label:'Cost',type:'money',align:'right'},{key:'total_cost',label:'Value',type:'money',align:'right'}];if(type==='daily_receiving')return {title:'Daily Receiving Report',sections:[{rows,columns:detailCols,filters:[{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'}]}]};const months=monthAggregate(rows,'date','receiving_id','quantity','total_cost'),suppliers=groupTotals(rows,'supplier_name','quantity','total_cost'),products=groupTotals(rows,'product_name','quantity','total_cost');return {title:'Monthly Receiving Summary',sections:[{title:'Monthly Totals',rows:months,columns:monthlyCols()},{title:'Supplier Totals',rows:suppliers,columns:groupCols('Supplier')},{title:'Product Totals',rows:products,columns:groupCols('Product')} ]};}
+  if(type==='daily_transfer'||type==='monthly_transfer'||type==='branch_transfer'){const {data,error}=await supabase.from('v_daily_transfer_report').select('*').gte('date',from).lte('date',to);if(error)throw error;const rows=data||[];const detailCols=[{key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Reference'},{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'unit_cost',label:'Cost',type:'money',align:'right'},{key:'total_value',label:'Value',type:'money',align:'right'}];if(type==='daily_transfer')return {title:'Daily Transfer Report',sections:[{rows,columns:detailCols,filters:[{key:'to_branch',label:'Destination',type:'location'}]}]};if(type==='branch_transfer'){const x=groupTotals(rows,'to_branch','quantity','total_value').map(r=>({...r,group:locationName(r.group)}));return {title:'Branch Transfer Summary',sections:[{rows:x,columns:groupCols('Destination Branch')} ]};}const months=monthAggregate(rows,'date','transfer_id','quantity','total_value'),branches=groupTotals(rows,'to_branch','quantity','total_value').map(r=>({...r,group:locationName(r.group)})),products=groupTotals(rows,'product_name','quantity','total_value');return {title:'Monthly Transfer Summary',sections:[{title:'Monthly Totals',rows:months,columns:monthlyCols()},{title:'Destination Branch Totals',rows:branches,columns:groupCols('Destination Branch')},{title:'Product Totals',rows:products,columns:groupCols('Product')} ]};}
+  if(type==='daily_movement'||type==='monthly_movement'||type==='product_history'){const {data,error}=await supabase.from('v_stock_movement_ledger').select('*').gte('created_at',`${from}T00:00:00`).lte('created_at',`${to}T23:59:59.999`).order('created_at');if(error)throw error;const rows=data||[];const detail=[{key:'created_at',label:'Date / Time',type:'datetime'},{key:'movement_type',label:'Type',type:'movement'},{key:'reference_no',label:'Reference'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'quantity_in',label:'In',type:'qty',align:'right'},{key:'quantity_out',label:'Out',type:'qty',align:'right'},{key:'running_balance',label:'Balance',type:'qty',align:'right'},{key:'movement_value',label:'Value',type:'money',align:'right'}];if(type==='daily_movement'||type==='product_history')return {title:type==='product_history'?'Product Movement History':'Daily Movement Report',sections:[{rows,columns:detail,filters:[{key:'movement_type',label:'Movement Type'},{key:'branch_name',label:'Location',type:'location'}]}]};const normalized=rows.map(r=>({...r,move_date:String(r.created_at).slice(0,10),abs_qty:Number(r.quantity_in||0)+Number(r.quantity_out||0)}));const months=monthAggregate(normalized,'move_date','id','abs_qty','movement_value'),types=groupTotals(normalized,'movement_type','abs_qty','movement_value');return {title:'Monthly Movement Summary',sections:[{title:'Monthly Totals',rows:months,columns:monthlyCols()},{title:'Movement Type Totals',rows:types,columns:groupCols('Movement Type')} ]};}
+  if(type==='daily_waste'||type==='monthly_waste'){const {data,error}=await supabase.from('v_waste_report').select('*').gte('waste_date',from).lte('waste_date',to);if(error)throw error;const rows=data||[];const detail=[{key:'waste_date',label:'Date',type:'date'},{key:'branch_name',label:'Location',type:'location'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'waste_value',label:'Value',type:'money',align:'right'},{key:'reason',label:'Reason'}];if(type==='daily_waste')return {title:'Daily Waste Report',sections:[{rows,columns:detail,filters:[{key:'reason',label:'Reason'},{key:'branch_name',label:'Location',type:'location'}]}]};const months=monthAggregate(rows,'waste_date','id','quantity','waste_value'),reasons=groupTotals(rows,'reason','quantity','waste_value'),products=groupTotals(rows,'product_name','quantity','waste_value');return {title:'Monthly Waste Summary',sections:[{title:'Monthly Totals',rows:months,columns:monthlyCols()},{title:'Reason Totals',rows:reasons,columns:groupCols('Reason')},{title:'Product Totals',rows:products,columns:groupCols('Product')} ]};}
+  if(type==='warehouse_shops'){const wh=state.positions.filter(x=>x.branch_name==='Warehouse'),shops=state.positions.filter(x=>x.branch_name!=='Warehouse');const rows=[{group:'Bakery Warehouse',units:sum(wh,'available_quantity'),value:sum(wh,'stock_value'),skus:distinctCount(wh.filter(x=>Number(x.available_quantity)>0),'product_id')},{group:'Jeddah Shops',units:sum(shops,'available_quantity'),value:sum(shops,'stock_value'),skus:distinctCount(shops.filter(x=>Number(x.available_quantity)>0),'product_id')}];return {title:'Bakery Warehouse vs Jeddah Shops',sections:[{rows,columns:[{key:'group',label:'Group'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'skus',label:'Available SKUs',type:'qty',align:'right'},{key:'value',label:'Inventory Value',type:'money',align:'right'}]}]};}
+  if(type==='supplier_summary'){const {data,error}=await supabase.from('v_supplier_summary_report').select('*');if(error)throw error;return {title:'Supplier Summary',sections:[{rows:data||[],columns:[{key:'supplier_name',label:'Supplier'},{key:'active_products',label:'Products',type:'qty',align:'right'},{key:'total_received_units',label:'Received Units',type:'qty',align:'right'},{key:'total_receiving_value',label:'Receiving Value',type:'money',align:'right'},{key:'latest_receiving_date',label:'Latest Receiving',type:'date'}]}]};}
+  if(type==='category_summary'){const u=groupSum(state.positions,'category_name','available_quantity'),v=Object.fromEntries(groupSum(state.positions,'category_name','stock_value').map(x=>[x.label,x.value]));const rows=u.map(x=>({category:x.label,units:x.value,value:v[x.label]||0}));return {title:'Category Summary',sections:[{rows,columns:[{key:'category',label:'Category'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}]}]};}
+  if(type==='low_stock'||type==='out_stock'){const rows=state.positions.filter(x=>x.branch_name==='Warehouse'&&x.stock_status===(type==='low_stock'?'Low Stock':'Out of Stock'));return {title:type==='low_stock'?'Low Stock Report':'Out of Stock Report',sections:[{rows,columns:cols.stock,filters:[{key:'category_name',label:'Category'},{key:'supplier_name',label:'Supplier'}]}]};}
+  if(type==='expiry')return {title:'Expiry Report',sections:[{rows:state.expiry,columns:[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'batch_no',label:'Batch'},{key:'branch_name',label:'Location',type:'location'},{key:'remaining_quantity',label:'Qty',type:'qty',align:'right'},{key:'expiry_date',label:'Expiry',type:'date'},{key:'days_until_expiry',label:'Days',type:'qty',align:'right'},{key:'supplier_name',label:'Supplier'},{key:'expiry_status',label:'Status',type:'badge'}],filters:[{key:'expiry_status',label:'Status'},{key:'branch_name',label:'Location',type:'location'}]}]};
+  if(type==='adjustment'){const {data,error}=await supabase.from('v_adjustment_report').select('*').gte('adjustment_date',from).lte('adjustment_date',to);if(error)throw error;return {title:'Stock Adjustment Report',sections:[{rows:data||[],columns:[{key:'adjustment_date',label:'Date',type:'date'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'quantity_change',label:'Difference',type:'qty',align:'right'},{key:'adjustment_value',label:'Value',type:'money',align:'right'},{key:'reason',label:'Reason'},{key:'performed_by',label:'By'}]}]};}
+  throw new Error('Unknown report type');
+}
+function groupTotals(rows,key,qtyKey,valueKey){const m=new Map();for(const r of rows){const k=r[key]??'Unspecified';if(!m.has(k))m.set(k,{group:k,line_count:0,units:0,value:0,transactions:new Set()});const x=m.get(k);x.line_count++;x.units+=Number(r[qtyKey]||0);x.value+=Number(r[valueKey]||0);x.transactions.add(r.receiving_id??r.transfer_id??r.id);}return [...m.values()].sort((a,b)=>b.value-a.value).map(x=>({group:x.group,transactions:x.transactions.size,line_count:x.line_count,units:x.units,value:x.value}));}
+function monthlyCols(){return [{key:'month',label:'Month'},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
+function groupCols(label){return [{key:'group',label},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
+
+$('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');$('#refreshBtn').onclick=async()=>{try{await requireData(true);await go(state.currentPage);}catch(e){fail(e,'Refresh failed');}};$('#logoutBtn').onclick=async()=>{await supabase.auth.signOut();};
+$('#loginForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter,old=btn.textContent;btn.disabled=true;btn.textContent='Signing in…';try{const {error}=await supabase.auth.signInWithPassword({email:$('#loginEmail').value.trim(),password:$('#loginPassword').value});if(error)throw error;}catch(err){fail(err,'Sign in failed');}finally{btn.disabled=false;btn.textContent=old;}};
+$('#resetPasswordBtn').onclick=async()=>{const email=$('#loginEmail').value.trim();if(!email)return toast('Enter your email first','error');const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:location.origin});if(error)fail(error);else toast('Password reset email sent','success');};
+
+async function boot(session){state.session=session;if(!session){authView.classList.remove('hidden');appView.classList.add('hidden');return;}authView.classList.add('hidden');appView.classList.remove('hidden');try{await loadAppUser();await requireData(true);renderNav();await go(state.currentPage);}catch(e){fail(e,'Could not load account');}}
+supabase.auth.onAuthStateChange((_event,session)=>boot(session));const {data:{session}}=await supabase.auth.getSession();await boot(session);
