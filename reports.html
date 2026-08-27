@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Joffrey's Bakery Jeddah — Reports</title>
+  <style>
+    :root{
+      --bg:#f3f4f6;--card:#fff;--ink:#111827;--muted:#6b7280;--line:#d1d5db;
+      --primary:#111827;--blue:#2563eb;--green:#15803d;--danger:#b91c1c;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+    button,input,select{font:inherit}
+    .shell{max-width:1280px;margin:auto;padding:16px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+    .brand h1{font-size:18px;margin:0}.brand p{font-size:12px;color:var(--muted);margin:3px 0 0}
+    .btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer}
+    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.blue{background:var(--blue);color:#fff;border-color:var(--blue)}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+    .auth{max-width:420px;margin:12vh auto}
+    .auth h2{margin-top:0}.stack{display:grid;gap:10px}
+    label{font-size:12px;font-weight:700;color:#374151;display:grid;gap:5px}
+    input,select{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;color:var(--ink)}
+    .controls{display:grid;grid-template-columns:1.5fr 1fr 1fr auto;gap:10px;align-items:end}
+    .hidden{display:none!important}
+    .status{font-size:12px;color:var(--muted)}
+    .status.error{color:var(--danger)}
+    .report-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;border-bottom:2px solid var(--ink);padding-bottom:8px;margin-bottom:10px}
+    .report-head h2{margin:0;font-size:18px}.report-head p{margin:3px 0 0;font-size:11px;color:var(--muted)}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+    .metric{border:1px solid var(--line);border-radius:8px;padding:9px;background:#f9fafb}
+    .metric span{font-size:10px;color:var(--muted);display:block}.metric strong{font-size:16px}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:11px}
+    th,td{border:1px solid var(--line);padding:6px 7px;text-align:left;vertical-align:middle}
+    th{background:#1f2937;color:white;font-size:10px}
+    td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+    tfoot td{font-weight:800;background:#eef2f7}
+    .empty{text-align:center;padding:35px;color:var(--muted)}
+    .footer{display:flex;justify-content:space-between;gap:20px;font-size:10px;color:#374151;margin-top:14px}
+    .mobile-note{font-size:11px;color:var(--muted);margin-top:8px}
+    @media(max-width:720px){
+      .shell{padding:10px}.top{align-items:flex-start}.controls{grid-template-columns:1fr 1fr}
+      .controls .wide{grid-column:1/-1}.summary{grid-template-columns:1fr 1fr}
+      .report-head{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions .btn{flex:1}
+      table{font-size:9px}th,td{padding:5px}
+    }
+    @page{size:A4 landscape;margin:7mm}
+    @media print{
+      body{background:#fff}
+      .shell{max-width:none;padding:0}
+      .top,.controls-card,.actions,.mobile-note,.screen-only{display:none!important}
+      .card{border:0;padding:0;margin:0}
+      .report-card{display:block!important}
+      .report-head{margin-bottom:4mm}
+      .report-head h2{font-size:14pt}
+      .report-head p{font-size:7.5pt}
+      .summary{grid-template-columns:repeat(4,1fr);gap:2mm;margin-bottom:3mm}
+      .metric{padding:2mm;border-radius:0}.metric span{font-size:6.5pt}.metric strong{font-size:10pt}
+      .table-wrap{overflow:visible}
+      table{font-size:6.2pt;page-break-inside:avoid}
+      th,td{padding:1.15mm 1.3mm;line-height:1.05}
+      th{font-size:6pt}
+      .footer{font-size:7pt;margin-top:3mm}
+      .daily-print table{font-size:5.7pt}
+      .daily-print th,.daily-print td{padding:.85mm 1.1mm}
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="top">
+      <div class="brand">
+        <h1>JOFFREY'S BAKERY JEDDAH</h1>
+        <p>Bakery Inventory Management System — Reports</p>
+      </div>
+      <a class="btn screen-only" href="./">Back to Inventory</a>
+    </div>
+
+    <section id="authCard" class="card auth hidden">
+      <h2>Sign in</h2>
+      <p class="status">Use the same bakery inventory account.</p>
+      <form id="loginForm" class="stack">
+        <label>Email<input id="email" type="email" required autocomplete="email"></label>
+        <label>Password<input id="password" type="password" required autocomplete="current-password"></label>
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+      <p id="authError" class="status error"></p>
+    </section>
+
+    <div id="app" class="hidden">
+      <section class="card controls-card">
+        <div class="controls">
+          <label class="wide">Report
+            <select id="reportType">
+              <option value="daily_receiving">Daily Receiving Report</option>
+              <option value="daily_transfer">Daily Transfer Report</option>
+              <option value="monthly_receiving">Monthly Receiving Report</option>
+              <option value="monthly_transfer">Monthly Transfer Report</option>
+            </select>
+          </label>
+          <label id="dateWrap">Date
+            <input id="reportDate" type="date" min="2026-08-22">
+          </label>
+          <label id="monthWrap" class="hidden">Month
+            <input id="reportMonth" type="month" min="2026-08">
+          </label>
+          <button id="runBtn" class="btn blue">View Report</button>
+        </div>
+        <div class="mobile-note">On Android: tap <b>Print / Save PDF</b>, then choose <b>Save as PDF</b> in the print screen.</div>
+      </section>
+
+      <section id="reportCard" class="card report-card">
+        <div class="empty">Choose a report and tap View Report.</div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const SUPABASE_URL='https://ivqygskesdrretwgouea.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY='sb_publishable_f4Jv-1y826TQkpRbVYAeEg_91xKWGSx';
+    const supabase=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{
+      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+    });
+
+    const $=s=>document.querySelector(s);
+    const esc=(v='')=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    const num=(v,d=0)=>Number(v||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const money=v=>`SAR ${num(v,2)}`;
+    const qty=v=>num(v,Number.isInteger(Number(v))?0:2);
+    const dateFmt=v=>{if(!v)return '—';const [y,m,d]=String(v).slice(0,10).split('-');return `${d}/${m}/${y}`};
+    const locationName=v=>String(v||'')==='Warehouse'?'Bakery Warehouse':String(v||'');
+    const isoToday=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+
+    const reportType=$('#reportType'), dateWrap=$('#dateWrap'), monthWrap=$('#monthWrap');
+    $('#reportDate').value=isoToday();
+    $('#reportDate').max=isoToday();
+    $('#reportMonth').value=isoToday().slice(0,7);
+    $('#reportMonth').max=isoToday().slice(0,7);
+
+    function syncControls(){
+      const monthly=reportType.value.startsWith('monthly_');
+      dateWrap.classList.toggle('hidden',monthly);
+      monthWrap.classList.toggle('hidden',!monthly);
+    }
+    reportType.onchange=syncControls; syncControls();
+
+    async function showSession(session){
+      if(session){
+        $('#authCard').classList.add('hidden');
+        $('#app').classList.remove('hidden');
+      }else{
+        $('#authCard').classList.remove('hidden');
+        $('#app').classList.add('hidden');
+      }
+    }
+
+    $('#loginForm').onsubmit=async e=>{
+      e.preventDefault();
+      $('#authError').textContent='';
+      const btn=e.submitter; btn.disabled=true; btn.textContent='Signing in…';
+      try{
+        const {error}=await supabase.auth.signInWithPassword({
+          email:$('#email').value.trim(),password:$('#password').value
+        });
+        if(error)throw error;
+      }catch(err){$('#authError').textContent=err.message||String(err)}
+      finally{btn.disabled=false;btn.textContent='Sign in'}
+    };
+
+    supabase.auth.onAuthStateChange((_event,session)=>showSession(session));
+    const {data:{session}}=await supabase.auth.getSession();
+    await showSession(session);
+
+    function monthRange(month){
+      const [y,m]=month.split('-').map(Number);
+      const last=new Date(y,m,0).getDate();
+      return {from:`${month}-01`,to:`${month}-${String(last).padStart(2,'0')}`};
+    }
+
+    function metric(label,value){return `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`}
+    function printButton(){return `<button class="btn primary" id="printBtn">Print / Save PDF</button>`}
+
+    function renderDailyReceiving(rows,date){
+      const units=rows.reduce((a,r)=>a+Number(r.quantity||0),0);
+      const value=rows.reduce((a,r)=>a+Number(r.total_cost||0),0);
+      const receipts=new Set(rows.map(r=>r.receiving_id)).size;
+      const suppliers=[...new Set(rows.map(r=>r.supplier_name).filter(Boolean))].join(', ')||'—';
+      return `
+        <div class="daily-print">
+          <div class="report-head">
+            <div><h2>DAILY RECEIVING REPORT</h2><p>Date: ${dateFmt(date)} · Location: Bakery Warehouse</p></div>
+            <div class="actions">${printButton()}</div>
+          </div>
+          <div class="summary">
+            ${metric('Date',dateFmt(date))}${metric('Receipts',qty(receipts))}
+            ${metric('Total Units',`${qty(units)} PCS`)}${metric('Total Value',money(value))}
+          </div>
+          <p style="font-size:9px;margin:0 0 6px"><b>Supplier(s):</b> ${esc(suppliers)}</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>No.</th><th>Reference</th><th>Invoice</th><th>Supplier</th><th>SKU</th><th>Product</th><th class="num">Qty</th><th class="num">Unit Cost</th><th class="num">Value</th><th>Expiry</th></tr></thead>
+            <tbody>${rows.map((r,i)=>`<tr>
+              <td>${i+1}</td><td>${esc(r.reference_no||'—')}</td><td>${esc(r.invoice_no||'—')}</td>
+              <td>${esc(r.supplier_name||'—')}</td><td>${esc(r.product_code||'—')}</td><td>${esc(r.product_name||'—')}</td>
+              <td class="num">${qty(r.quantity)}</td><td class="num">${num(r.unit_cost,2)}</td><td class="num">${num(r.total_cost,2)}</td><td>${dateFmt(r.expiry_date)}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="6">TOTAL</td><td class="num">${qty(units)}</td><td></td><td class="num">${num(value,2)}</td><td></td></tr></tfoot>
+          </table></div>
+          <div class="footer"><span>Prepared by: ____________________</span><span>Checked by: ____________________</span><span>Signature: ____________________</span></div>
+        </div>`;
+    }
+
+    function renderDailyTransfer(rows,date){
+      const units=rows.reduce((a,r)=>a+Number(r.quantity||0),0);
+      const value=rows.reduce((a,r)=>a+Number(r.total_value||0),0);
+      const transfers=new Set(rows.map(r=>r.transfer_id)).size;
+      const destinations=[...new Set(rows.map(r=>locationName(r.to_branch)).filter(Boolean))].join(', ')||'—';
+      return `
+        <div class="daily-print">
+          <div class="report-head">
+            <div><h2>DAILY TRANSFER REPORT</h2><p>Date: ${dateFmt(date)} · From: Bakery Warehouse · To: ${esc(destinations)}</p></div>
+            <div class="actions">${printButton()}</div>
+          </div>
+          <div class="summary">
+            ${metric('Date',dateFmt(date))}${metric('Transfers',qty(transfers))}
+            ${metric('Total Units',`${qty(units)} PCS`)}${metric('Total Value',money(value))}
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>No.</th><th>Reference</th><th>From</th><th>To</th><th>SKU</th><th>Product</th><th class="num">Qty</th><th class="num">Unit Cost</th><th class="num">Value</th></tr></thead>
+            <tbody>${rows.map((r,i)=>`<tr>
+              <td>${i+1}</td><td>${esc(r.reference_no||'—')}</td><td>${esc(locationName(r.from_branch))}</td><td>${esc(locationName(r.to_branch))}</td>
+              <td>${esc(r.product_code||'—')}</td><td>${esc(r.product_name||'—')}</td>
+              <td class="num">${qty(r.quantity)}</td><td class="num">${num(r.unit_cost,2)}</td><td class="num">${num(r.total_value,2)}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="6">TOTAL</td><td class="num">${qty(units)}</td><td></td><td class="num">${num(value,2)}</td></tr></tfoot>
+          </table></div>
+          <div class="footer"><span>Prepared by: ____________________</span><span>Checked by: ____________________</span><span>Signature: ____________________</span></div>
+        </div>`;
+    }
+
+    function aggregateMonthly(rows,kind){
+      const map=new Map();
+      for(const r of rows){
+        const date=String(r.date||'').slice(0,10);
+        const group=kind==='receiving'?(r.supplier_name||'Unspecified'):locationName(r.to_branch||'Unspecified');
+        const key=`${date}|${group}`;
+        if(!map.has(key))map.set(key,{date,group,tx:new Set(),lines:0,units:0,value:0});
+        const x=map.get(key);
+        x.tx.add(kind==='receiving'?r.receiving_id:r.transfer_id);
+        x.lines++;
+        x.units+=Number(r.quantity||0);
+        x.value+=Number(kind==='receiving'?r.total_cost:r.total_value||0);
+      }
+      return [...map.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.group.localeCompare(b.group));
+    }
+
+    function renderMonthly(rows,month,kind){
+      const agg=aggregateMonthly(rows,kind);
+      const units=rows.reduce((a,r)=>a+Number(r.quantity||0),0);
+      const value=rows.reduce((a,r)=>a+Number(kind==='receiving'?r.total_cost:r.total_value||0),0);
+      const tx=new Set(rows.map(r=>kind==='receiving'?r.receiving_id:r.transfer_id)).size;
+      const title=kind==='receiving'?'MONTHLY RECEIVING REPORT':'MONTHLY TRANSFER REPORT';
+      const groupLabel=kind==='receiving'?'Supplier':'Destination';
+      return `
+        <div>
+          <div class="report-head">
+            <div><h2>${title}</h2><p>Month: ${esc(month.slice(5,7)+'/'+month.slice(0,4))}</p></div>
+            <div class="actions">${printButton()}</div>
+          </div>
+          <div class="summary">
+            ${metric('Month',month.slice(5,7)+'/'+month.slice(0,4))}
+            ${metric(kind==='receiving'?'Receipts':'Transfers',qty(tx))}
+            ${metric('Total Units',`${qty(units)} PCS`)}${metric('Total Value',money(value))}
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>No.</th><th>Date</th><th>${groupLabel}</th><th class="num">Transactions</th><th class="num">Lines</th><th class="num">Units</th><th class="num">Value (SAR)</th></tr></thead>
+            <tbody>${agg.map((r,i)=>`<tr>
+              <td>${i+1}</td><td>${dateFmt(r.date)}</td><td>${esc(r.group)}</td><td class="num">${r.tx.size}</td>
+              <td class="num">${r.lines}</td><td class="num">${qty(r.units)}</td><td class="num">${num(r.value,2)}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="5">TOTAL</td><td class="num">${qty(units)}</td><td class="num">${num(value,2)}</td></tr></tfoot>
+          </table></div>
+          <div class="footer"><span>Prepared by: ____________________</span><span>Checked by: ____________________</span><span>Signature: ____________________</span></div>
+        </div>`;
+    }
+
+    async function runReport(){
+      const type=reportType.value;
+      const host=$('#reportCard');
+      const btn=$('#runBtn'); btn.disabled=true; btn.textContent='Loading…';
+      host.innerHTML='<div class="empty">Loading live Supabase data…</div>';
+      try{
+        let from,to,view,orderField='date';
+        const monthly=type.startsWith('monthly_');
+        if(monthly){
+          const month=$('#reportMonth').value;
+          if(!month)throw new Error('Choose a month');
+          ({from,to}=monthRange(month));
+        }else{
+          from=to=$('#reportDate').value;
+          if(!from)throw new Error('Choose a date');
+        }
+        view=type.includes('receiving')?'v_daily_receiving_report':'v_daily_transfer_report';
+        const {data,error}=await supabase.from(view).select('*').gte('date',from).lte('date',to).order(orderField,{ascending:true});
+        if(error)throw error;
+        const rows=data||[];
+        if(!rows.length){
+          host.innerHTML=`<div class="report-head"><div><h2>${esc(type.replaceAll('_',' ').toUpperCase())}</h2><p>${monthly?esc($('#reportMonth').value):dateFmt(from)}</p></div></div><div class="empty">No records found.</div>`;
+          return;
+        }
+        if(type==='daily_receiving')host.innerHTML=renderDailyReceiving(rows,from);
+        else if(type==='daily_transfer')host.innerHTML=renderDailyTransfer(rows,from);
+        else if(type==='monthly_receiving')host.innerHTML=renderMonthly(rows,$('#reportMonth').value,'receiving');
+        else host.innerHTML=renderMonthly(rows,$('#reportMonth').value,'transfer');
+        const p=$('#printBtn'); if(p)p.onclick=()=>window.print();
+      }catch(err){
+        host.innerHTML=`<div class="empty" style="color:#b91c1c">${esc(err.message||String(err))}</div>`;
+      }finally{btn.disabled=false;btn.textContent='View Report'}
+    }
+
+    $('#runBtn').onclick=runReport;
+  </script>
+</body>
+</html>
