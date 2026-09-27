@@ -386,23 +386,23 @@ const pages = {
   },
 
   async receiving(){
-    const {data,error}=await supabase.from('v_daily_receiving_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
-    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newReceiving" ${canPost()?'':'disabled'}>＋ New Receiving</button></div><div id="receivingTable"></div>`;$('#newReceiving').onclick=openReceiving;
-    renderDataTable('#receivingTable',data||[],[
-      {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Receiving Reference'},{key:'invoice_no',label:'Invoice Number'},{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Receiving Location',type:'location'},
-      {key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'unit',label:'Unit'},{key:'quantity',label:'Quantity',type:'qty',align:'right'},
-      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'total_cost',label:'Line Value',type:'money',align:'right'},{key:'expiry_date',label:'Expiry Date',type:'date'},{key:'batch_no',label:'Batch'},{key:'performed_by',label:'Performed By'}
-    ],{filters:[{key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'}],filename:'joffreys-daily-receiving',title:'Joffrey’s Bakery Receiving Report',pageSize:50});
+    const {data,error}=await supabase.from('v_daily_receiving_report').select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;
+    const rows=data||[], groups=groupTransactionDates(rows,'receiving');
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newReceiving" ${canPost()?'':'disabled'}>＋ New Receiving</button></div>
+      <div class="info-banner">Receiving is grouped by <b>Receiving Date</b>. Click a date to see every receiving transaction and all products received that day. Each date can be printed or saved as PDF.</div>
+      <div id="receivingDateList"></div>`;
+    $('#newReceiving').onclick=openReceiving;
+    renderTransactionDateList('#receivingDateList',groups,'receiving');
   },
 
   async transfers(){
-    const {data,error}=await supabase.from('v_daily_transfer_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
-    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newTransfer" ${canPost()?'':'disabled'}>⇄ New Transfer</button></div><div id="transferTable"></div>`;$('#newTransfer').onclick=openTransfer;
-    renderDataTable('#transferTable',data||[],[
-      {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Transfer Reference'},{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'},
-      {key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'unit',label:'Unit'},{key:'quantity',label:'Quantity',type:'qty',align:'right'},
-      {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'total_value',label:'Total Value',type:'money',align:'right'},{key:'performed_by',label:'Performed By'}
-    ],{filters:[{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'}],filename:'joffreys-daily-transfers',title:'Joffrey’s Bakery Transfer Report',pageSize:50});
+    const {data,error}=await supabase.from('v_daily_transfer_report').select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;
+    const rows=data||[], groups=groupTransactionDates(rows,'transfer');
+    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newTransfer" ${canPost()?'':'disabled'}>⇄ New Transfer</button></div>
+      <div class="info-banner">Transfers are grouped by <b>Transfer Date</b>. Click a date to see every transfer transaction and all products transferred that day. Each date can be printed or saved as PDF.</div>
+      <div id="transferDateList"></div>`;
+    $('#newTransfer').onclick=openTransfer;
+    renderTransactionDateList('#transferDateList',groups,'transfer');
   },
 
   async adjustments(){
@@ -462,6 +462,92 @@ const pages = {
     ],{filters:[{key:'supplier_name',label:'Supplier'},{key:'category',label:'Category'},{key:'is_active',label:'Status'}],filename:'joffreys-products',title:'Joffrey’s Bakery Product Master',pageSize:50});
   }
 };
+
+function groupTransactionDates(rows,kind){
+  const byDate=new Map();
+  const txnKey=kind==='receiving'?'receiving_id':'transfer_id';
+  const valueKey=kind==='receiving'?'total_cost':'total_value';
+  const partyKey=kind==='receiving'?'supplier_name':'to_branch';
+  for(const r of rows||[]){
+    const date=String(r.date||'').slice(0,10)||'';
+    if(!date)continue;
+    if(!byDate.has(date))byDate.set(date,{date,rows:[],transactions:new Set(),units:0,value:0,parties:new Set()});
+    const g=byDate.get(date);
+    g.rows.push(r);
+    g.transactions.add(r[txnKey]??r.reference_no??r.id);
+    g.units+=Number(r.quantity||0);
+    g.value+=Number(r[valueKey]||0);
+    if(r[partyKey])g.parties.add(kind==='transfer'?locationName(r[partyKey]):r[partyKey]);
+  }
+  return [...byDate.values()].sort((a,b)=>b.date.localeCompare(a.date));
+}
+
+function renderTransactionDateList(host,groups,kind){
+  const el=$(host);
+  const label=kind==='receiving'?'Receiving':'Transfer';
+  const partyLabel=kind==='receiving'?'Supplier(s)':'Destination(s)';
+  if(!groups.length){el.innerHTML='<div class="panel empty">No transactions found.</div>';return;}
+  el.innerHTML=`<div class="table-card">
+    <div class="table-toolbar"><div><strong>${esc(label)} by Date</strong><div class="muted small">One row per operational date · click View to open the complete daily document</div></div></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Date</th><th>Transactions</th><th>Lines</th><th>Units</th><th>Value</th><th>${partyLabel}</th><th>Action</th>
+    </tr></thead><tbody>
+      ${groups.map(g=>`<tr>
+        <td><strong>${esc(dateFmt(g.date))}</strong></td>
+        <td>${qty(g.transactions.size)}</td><td>${qty(g.rows.length)}</td><td>${qty(g.units)}</td><td>${money(g.value)}</td>
+        <td>${esc([...g.parties].join(', ')||'—')}</td>
+        <td><button class="btn small-btn primary" data-view-date="${esc(g.date)}">View ${esc(label)}</button></td>
+      </tr>`).join('')}
+    </tbody></table></div>
+  </div>`;
+  $('[data-view-date]',el).forEach(btn=>btn.onclick=()=>{
+    const group=groups.find(g=>g.date===btn.dataset.viewDate);
+    if(group)openTransactionDateDetail(kind,group);
+  });
+}
+
+function openTransactionDateDetail(kind,group){
+  const receiving=kind==='receiving';
+  const title=`${receiving?'Receiving':'Transfer'} — ${dateFmt(group.date)}`;
+  const columns=receiving?[
+    {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Receiving Reference'},{key:'invoice_no',label:'Invoice Number'},
+    {key:'supplier_name',label:'Supplier'},{key:'branch_name',label:'Location',type:'location'},{key:'product_code',label:'SKU'},
+    {key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'unit',label:'Unit'},
+    {key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},
+    {key:'total_cost',label:'Value',type:'money',align:'right'},{key:'expiry_date',label:'Expiry',type:'date'},
+    {key:'batch_no',label:'Batch'},{key:'performed_by',label:'Performed By'}
+  ]:[
+    {key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Transfer Reference'},{key:'from_branch',label:'From',type:'location'},
+    {key:'to_branch',label:'To',type:'location'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},
+    {key:'category_name',label:'Category'},{key:'unit',label:'Unit'},{key:'quantity',label:'Qty',type:'qty',align:'right'},
+    {key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:'total_value',label:'Value',type:'money',align:'right'},
+    {key:'performed_by',label:'Performed By'}
+  ];
+  const rows=group.rows;
+  const subtitle=receiving
+    ? 'All supplier receiving lines posted on this operational date.'
+    : 'All warehouse-to-branch transfer lines posted on this operational date.';
+  openModal(title,subtitle,`<div class="daily-document">
+    <div class="kpi-grid kpi-grid-3">
+      ${kpi('Transactions',qty(group.transactions.size),receiving?'Receiving documents':'Transfer documents')}
+      ${kpi('Total Units',qty(group.units),'All lines')}
+      ${kpi('Total Value',money(group.value),receiving?'Receiving cost':'Transferred stock value')}
+    </div>
+    <div class="page-actions">
+      <button class="btn primary" id="printDailyTransaction">Print / Save PDF</button>
+      <button class="btn" id="exportDailyTransaction">Excel</button>
+      <button class="btn" id="closeDailyTransaction">Close</button>
+    </div>
+    <div id="dailyTransactionTable"></div>
+  </div>`,'wide');
+  renderDataTable('#dailyTransactionTable',rows,columns,{
+    filters:receiving?[{key:'supplier_name',label:'Supplier'},{key:'reference_no',label:'Reference'}]:[{key:'to_branch',label:'Destination',type:'location'},{key:'reference_no',label:'Reference'}],
+    filename:`joffreys-${kind}-${group.date}`,title:`Joffrey’s Bakery ${title}`,pageSize:100
+  });
+  $('#printDailyTransaction').onclick=()=>printRows(rows,columns,`Joffrey’s Bakery ${title}`);
+  $('#exportDailyTransaction').onclick=()=>exportRowsExcel(rows,columns,`joffreys-${kind}-${group.date}`);
+  $('#closeDailyTransaction').onclick=closeModal;
+}
 
 function productOptions(supplierId=null){return state.products.filter(p=>!supplierId||Number(p.supplier_id)===Number(supplierId)).map(p=>`<option value="${p.id}">${esc(p.product_code||p.ref_no)} — ${esc(p.name)}</option>`).join('');}
 function supplierOptions(){return state.suppliers.filter(s=>s.is_active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');}
