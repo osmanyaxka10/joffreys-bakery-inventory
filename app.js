@@ -488,22 +488,33 @@ function renderTransactionDateList(host,groups,kind){
   const partyLabel=kind==='receiving'?'Supplier(s)':'Destination(s)';
   if(!groups.length){el.innerHTML='<div class="panel empty">No transactions found.</div>';return;}
   el.innerHTML=`<div class="table-card">
-    <div class="table-toolbar"><div><strong>${esc(label)} by Date</strong><div class="muted small">One row per operational date · click View to open the complete daily document</div></div></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr>
+    <div class="table-toolbar"><div><strong>${esc(label)} by Date</strong><div class="muted small">Click any date row or the View button to open the complete daily document.</div></div></div>
+    <div class="table-wrap"><table class="data-table transaction-date-table"><thead><tr>
       <th>Date</th><th>Transactions</th><th>Lines</th><th>Units</th><th>Value</th><th>${partyLabel}</th><th>Action</th>
     </tr></thead><tbody>
-      ${groups.map(g=>`<tr>
+      ${groups.map(g=>`<tr class="transaction-date-row" data-view-date="${esc(g.date)}" tabindex="0" role="button" aria-label="Open ${esc(label)} for ${esc(dateFmt(g.date))}">
         <td><strong>${esc(dateFmt(g.date))}</strong></td>
         <td>${qty(g.transactions.size)}</td><td>${qty(g.rows.length)}</td><td>${qty(g.units)}</td><td>${money(g.value)}</td>
         <td>${esc([...g.parties].join(', ')||'—')}</td>
-        <td><button class="btn small-btn primary" data-view-date="${esc(g.date)}">View ${esc(label)}</button></td>
+        <td><button type="button" class="btn small-btn primary" data-view-date-button="${esc(g.date)}">View ${esc(label)}</button></td>
       </tr>`).join('')}
     </tbody></table></div>
   </div>`;
-  $('[data-view-date]',el).forEach(btn=>btn.onclick=()=>{
-    const group=groups.find(g=>g.date===btn.dataset.viewDate);
+  const openDate=(date)=>{
+    const group=groups.find(g=>g.date===date);
     if(group)openTransactionDateDetail(kind,group);
-  });
+  };
+  el.onclick=(event)=>{
+    const button=event.target.closest('[data-view-date-button]');
+    const row=event.target.closest('[data-view-date]');
+    if(button){event.stopPropagation();openDate(button.dataset.viewDateButton);return;}
+    if(row)openDate(row.dataset.viewDate);
+  };
+  el.onkeydown=(event)=>{
+    if(event.key!=='Enter'&&event.key!==' ')return;
+    const row=event.target.closest('[data-view-date]');
+    if(row){event.preventDefault();openDate(row.dataset.viewDate);}
+  };
 }
 
 function openTransactionDateDetail(kind,group){
