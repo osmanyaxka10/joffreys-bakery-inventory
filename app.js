@@ -77,8 +77,22 @@ function dateFmt(v){if(!v)return '—';const s=String(v).slice(0,10);const [y,m,
 function dateTimeFmt(v){if(!v)return '—';const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
 function locationName(name){return String(name||'')==='Warehouse'?'Bakery Warehouse':String(name||'');}
 function displayMovement(v){return String(v||'').replaceAll('_',' ');}
-function sum(rows,key){return (rows||[]).reduce((a,r)=>a+Number(r[key]||0),0);}
-function distinctCount(rows,key){return new Set((rows||[]).map(r=>r[key]).filter(v=>v!==null&&v!==undefined)).size;}
+function rowsOf(data){
+  return Array.isArray(data) ? data : (data == null ? [] : [data]);
+}
+function resultRows(result,label){
+  if(!result) return [];
+  if(result.error) throw new Error(label+': '+(result.error.message||result.error));
+  return rowsOf(result.data);
+}
+function safeResultRows(result,label,warnings){
+  if(!result) return [];
+  if(result.status==='rejected'){warnings.push(label+': '+(result.reason?.message||result.reason||'request failed'));return [];}
+  if(result.value?.error){warnings.push(label+': '+(result.value.error.message||result.value.error));return [];}
+  return rowsOf(result.value?.data);
+}
+function sum(rows,key){return rowsOf(rows).reduce((a,r)=>a+Number(r[key]||0),0);}
+function distinctCount(rows,key){return new Set(rowsOf(rows).map(r=>r[key]).filter(v=>v!==null&&v!==undefined)).size;}
 function groupSum(rows,key,valueKey){const m=new Map();for(const r of rows||[]){const k=r[key]??'Unspecified';m.set(k,(m.get(k)||0)+Number(r[valueKey]||0));}return [...m.entries()].map(([label,value])=>({label,value}));}
 function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className=`toast show ${type}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='toast',4200);}
 function setLoading(msg='Loading…'){content.innerHTML=`<div class="panel loading">${esc(msg)}</div>`;}
@@ -135,7 +149,7 @@ function aggregateTrend(rows,dateKey,valueKey,from,to){
 
 async function requireData(force=false){
   if(!force&&state.products.length&&state.branches.length&&state.suppliers.length&&state.positions.length)return;
-  const [p,allp,s,b,pos,exp] = await Promise.all([
+  const results=await Promise.allSettled([
     supabase.from('products').select('id,ref_no,product_code,name,category,category_id,unit,unit_price,unit_cost,low_stock_alert,reorder_level,minimum_stock,maximum_stock,is_active,supplier_id').eq('is_active',true).order('name'),
     supabase.from('products').select('id,ref_no,product_code,name,category,category_id,unit,unit_price,unit_cost,low_stock_alert,reorder_level,minimum_stock,maximum_stock,is_active,supplier_id').order('name'),
     supabase.from('suppliers').select('*').order('name'),
@@ -143,9 +157,13 @@ async function requireData(force=false){
     supabase.from('v_stock_positions').select('*'),
     supabase.from('v_expiry_alerts').select('*')
   ]);
-  for(const q of [p,allp,s,b,pos,exp])if(q.error)throw q.error;
-  state.products=p.data||[];state.allProducts=allp.data||[];state.suppliers=s.data||[];state.branches=(b.data||[]).filter(x=>x.is_active);state.positions=pos.data||[];state.expiry=exp.data||[];
+  const warnings=[];
+  const labels=['Active products','All products','Suppliers','Branches','Stock positions','Expiry alerts'];
+  const values=results.map((r,i)=>safeResultRows(r,labels[i],warnings));
+  state.products=values[0];state.allProducts=values[1];state.suppliers=values[2];state.branches=values[3].filter(x=>x.is_active);state.positions=values[4];state.expiry=values[5];
   state.warehouse=state.branches.find(x=>String(x.name).toLowerCase()==='warehouse')||null;
+  state.dataWarnings=warnings;
+  if(warnings.length)console.warn('Some dashboard data sources could not be loaded:',warnings);
 }
 
 async function loadAppUser(){
@@ -272,14 +290,17 @@ const pages = {
   async dashboard(){
     ensureDashboardProStyles();
     const {from,to}=periodRange();
-    const [rr,tr,wr,mr] = await Promise.all([
+    const dashboardResults=await Promise.allSettled([
       supabase.from('v_daily_receiving_report').select('date,receiving_id,supplier_name,quantity,total_cost').gte('date',from).lte('date',to).order('date',{ascending:true}),
       supabase.from('v_daily_transfer_report').select('date,transfer_id,to_branch,quantity,total_value').gte('date',from).lte('date',to).order('date',{ascending:true}),
       supabase.from('v_waste_report').select('id,waste_date,quantity,waste_value').gte('waste_date',from).lte('waste_date',to).order('waste_date',{ascending:true}),
       supabase.from('v_stock_movement_ledger').select('transaction_date,transaction_key,quantity_in,quantity_out,movement_value').gte('transaction_date',from).lte('transaction_date',to).order('transaction_date',{ascending:true}).limit(5000)
     ]);
-    for(const q of [rr,tr,wr,mr])if(q.error)throw q.error;
-    const receiving=rr.data||[],transfers=tr.data||[],waste=wr.data||[],movements=mr.data||[];
+    const dashboardWarnings=[];
+    const receiving=safeResultRows(dashboardResults[0],'Receiving report',dashboardWarnings);
+    const transfers=safeResultRows(dashboardResults[1],'Transfer report',dashboardWarnings);
+    const waste=safeResultRows(dashboardResults[2],'Waste report',dashboardWarnings);
+    const movements=safeResultRows(dashboardResults[3],'Movement ledger',dashboardWarnings);
     const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
     const shops=state.positions.filter(x=>x.branch_name!=='Warehouse');
     const whUnits=sum(wh,'available_quantity'),whValue=sum(wh,'stock_value'),whSku=distinctCount(wh.filter(x=>Number(x.available_quantity)>0),'product_id');
@@ -358,7 +379,9 @@ const pages = {
     $('#dashPreset').onchange=e=>{state.dashboardPreset=e.target.value;$('#dashCustom').classList.toggle('hidden',e.target.value!=='custom');if(e.target.value!=='custom')go('dashboard');};
     if($('#dashApply'))$('#dashApply').onclick=()=>{const f=$('#dashFrom').value,t=$('#dashTo').value;if(!f||!t||f>t)return toast('Choose a valid custom date range','error');state.dashboardCustom={from:f,to:t};state.dashboardPreset='custom';go('dashboard');};
     $('#quickReceive').onclick=openReceiving;$('#quickTransfer').onclick=openTransfer;$('#quickAdjust').onclick=openAdjustment;$('#quickWaste').onclick=openWaste;
-    $$('[data-attention-page]').forEach(b=>b.onclick=()=>go(b.dataset.attentionPage));
+    $('[data-attention-page]').forEach(b=>b.onclick=()=>go(b.dataset.attentionPage));
+    const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
+    if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
 
   async stock(){
