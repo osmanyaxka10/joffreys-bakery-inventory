@@ -36,6 +36,7 @@ const navItems = [
   ['movements','≋','Movements'],
   ['receiving','↓','Receiving'],
   ['transfers','⇄','Transfers'],
+  ['transfer-invoices','▤','Transfer Invoices','./transfer-invoices.html'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
@@ -154,8 +155,8 @@ async function loadAppUser(){
 }
 
 function renderNav(){
-  $('#nav').innerHTML=navItems.map(([id,ico,label])=>`<button data-page="${id}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
-  $$('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.page));
+  $('#nav').innerHTML=navItems.map(([id,ico,label,href])=>`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
+  $('#nav button').forEach(b=>b.onclick=()=>{if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
 }
 
 async function go(page,throwOnError=false){
