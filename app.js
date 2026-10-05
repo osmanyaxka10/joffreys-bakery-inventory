@@ -7,7 +7,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 });
 
 const $ = (s, root=document) => root.querySelector(s);
-const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+const $ = (s, root=document) => Array.from(root.querySelectorAll(s));
 const content = $('#content');
 const authView = $('#authView');
 const appView = $('#appView');
@@ -91,8 +91,17 @@ function safeResultRows(result,label,warnings){
   if(result.value?.error){warnings.push(label+': '+(result.value.error.message||result.value.error));return [];}
   return rowsOf(result.value?.data);
 }
-function sum(rows,key){return rowsOf(rows).reduce((a,r)=>a+Number(r[key]||0),0);}
-function distinctCount(rows,key){return new Set(rowsOf(rows).map(r=>r[key]).filter(v=>v!==null&&v!==undefined)).size;}
+function sum(rows,key){
+  console.log('[sum] rows value:', rows, 'typeof:', typeof rows);
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  return list.reduce((a,r)=>a+Number(r[key]||0),0);
+}
+function distinctCount(rows,key){
+  console.log('[distinctCount] rows value:', rows, 'typeof:', typeof rows);
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  console.log('[distinctCount] list value:', list, 'typeof:', typeof list);
+  return new Set(list.map(r=>r[key]).filter(v=>v!==null&&v!==undefined)).size;
+}
 function groupSum(rows,key,valueKey){const m=new Map();for(const r of rows||[]){const k=r[key]??'Unspecified';m.set(k,(m.get(k)||0)+Number(r[valueKey]||0));}return [...m.entries()].map(([label,value])=>({label,value}));}
 function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className=`toast show ${type}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='toast',4200);}
 function setLoading(msg='Loading…'){content.innerHTML=`<div class="panel loading">${esc(msg)}</div>`;}
@@ -173,8 +182,13 @@ async function loadAppUser(){
 }
 
 function renderNav(){
-  $('#nav').innerHTML=navItems.map(([id,ico,label,href])=>`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
-  $('#nav button').forEach(b=>b.onclick=()=>{if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
+  const navList = Array.isArray(navItems) ? navItems : navItems ? [navItems] : [];
+  console.log('[renderNav] navItems value:', navItems, 'typeof:', typeof navItems, 'isArray:', Array.isArray(navItems));
+  $('#nav').innerHTML=navList.map(([id,ico,label,href])=>`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
+  const navButtonsValue = Array.from(document.querySelectorAll('#nav button'));
+  console.log('[renderNav] navButtons value:', navButtonsValue, 'typeof:', typeof navButtonsValue, 'isArray:', Array.isArray(navButtonsValue));
+  const navButtons = Array.isArray(navButtonsValue) ? navButtonsValue : navButtonsValue ? [navButtonsValue] : [];
+  navButtons.forEach(b=>b.onclick=()=>{if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
 }
 
 async function go(page,throwOnError=false){
