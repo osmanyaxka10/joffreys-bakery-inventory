@@ -269,12 +269,12 @@ function ensureDashboardProStyles(){
   `;document.head.appendChild(s);
 }
 
-function dualTrendChart(title,items,inLabel='Qty In',outLabel='Qty Out'){
+function dualTrendChart(title,items,inLabel='Qty In',outLabel='Qty Out',outColor=COLORS.waste){
   const max=Math.max(0,...items.flatMap(x=>[Number(x.inValue||0),Number(x.outValue||0)]));
-  if(!items.length||max<=0)return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${COLORS.waste}"></i>${esc(outLabel)}</span></div><div class="empty chart-empty">No activity in selected period</div></div>`;
+  if(!items.length||max<=0)return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${outColor}"></i>${esc(outLabel)}</span></div><div class="empty chart-empty">No activity in selected period</div></div>`;
   const mid=max/2;
-  const bars=items.map(x=>{const iv=Number(x.inValue||0),ov=Number(x.outValue||0),ih=iv>0?iv/max*100:0,oh=ov>0?ov/max*100:0;return `<div class="dual-col" title="${esc(x.label)} · ${esc(inLabel)} ${qty(iv)} · ${esc(outLabel)} ${qty(ov)}"><div class="dual-values"><span>${qty(iv)}</span><span>${qty(ov)}</span></div><div class="dual-bars"><div class="dual-bar${iv<=0?' zero':''}" style="height:${ih}%;background:${COLORS.receiving}"></div><div class="dual-bar${ov<=0?' zero':''}" style="height:${oh}%;background:${COLORS.waste}"></div></div><div class="dual-label">${esc(x.label)}</div></div>`;}).join('');
-  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${COLORS.waste}"></i>${esc(outLabel)}</span></div><div class="trend-scaled"><div class="trend-yaxis"><span>${qty(max)}</span><span>${qty(mid)}</span><span>0</span></div><div class="dual-trend">${bars}</div></div></div>`;
+  const bars=items.map(x=>{const iv=Number(x.inValue||0),ov=Number(x.outValue||0),ih=iv>0?iv/max*100:0,oh=ov>0?ov/max*100:0;return `<div class="dual-col" title="${esc(x.label)} · ${esc(inLabel)} ${qty(iv)} · ${esc(outLabel)} ${qty(ov)}"><div class="dual-values"><span>${qty(iv)}</span><span>${qty(ov)}</span></div><div class="dual-bars"><div class="dual-bar${iv<=0?' zero':''}" style="height:${ih}%;background:${COLORS.receiving}"></div><div class="dual-bar${ov<=0?' zero':''}" style="height:${oh}%;background:${outColor}"></div></div><div class="dual-label">${esc(x.label)}</div></div>`;}).join('');
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${outColor}"></i>${esc(outLabel)}</span></div><div class="trend-scaled"><div class="trend-yaxis"><span>${qty(max)}</span><span>${qty(mid)}</span><span>0</span></div><div class="dual-trend">${bars}</div></div></div>`;
 }
 
 function aggregateProductPositions(rows){
@@ -295,21 +295,18 @@ function dashboardAttentionHtml(lowRows,outRows,missingBatches,missingUnits){
   return `<div class="attention-panel"><div class="attention-head"><strong>Operations Attention</strong><span>${rows.length} items requiring review</span></div>${rows.length?`<div class="attention-list">${rows.map(r=>`<div class="attention-row"><i class="attention-dot" style="background:${r.color}"></i><div class="attention-title">${esc(r.title)}</div><div class="attention-meta">${esc(r.meta)}</div><button class="btn small-btn" data-attention-page="${r.page}">${esc(r.action)}</button></div>`).join('')}</div>`:'<div class="attention-empty">No attention items in current stock.</div>'}</div>`;
 }
 
-const pages = {
-  async dashboard(){
+const   async dashboard(){
     ensureDashboardProStyles();
-    const {from,to}=periodRange();
+    const from='2026-09-30';
+    const to=isoToday();
     const dashboardResults=await Promise.allSettled([
       supabase.from('v_daily_receiving_report').select('date,receiving_id,supplier_name,quantity,total_cost').gte('date',from).lte('date',to).order('date',{ascending:true}),
-      supabase.from('v_daily_transfer_report').select('date,transfer_id,to_branch,quantity,total_value').gte('date',from).lte('date',to).order('date',{ascending:true}),
-      supabase.from('v_waste_report').select('id,waste_date,quantity,waste_value').gte('waste_date',from).lte('waste_date',to).order('waste_date',{ascending:true}),
-      supabase.from('v_stock_movement_ledger').select('transaction_date,transaction_key,quantity_in,quantity_out,movement_value').gte('transaction_date',from).lte('transaction_date',to).order('transaction_date',{ascending:true}).limit(5000)
+      supabase.from('v_daily_transfer_report').select('date,transfer_id,to_branch,quantity,total_value').gte('date',from).lte('date',to).order('date',{ascending:true})
     ]);
     const dashboardWarnings=[];
     const receiving=safeResultRows(dashboardResults[0],'Receiving report',dashboardWarnings);
     const transfers=safeResultRows(dashboardResults[1],'Transfer report',dashboardWarnings);
-    const waste=safeResultRows(dashboardResults[2],'Waste report',dashboardWarnings);
-    const movements=safeResultRows(dashboardResults[3],'Movement ledger',dashboardWarnings);
+
     const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
     const shops=state.positions.filter(x=>x.branch_name!=='Warehouse');
     const whUnits=sum(wh,'available_quantity'),whValue=sum(wh,'stock_value'),whSku=distinctCount(wh.filter(x=>Number(x.available_quantity)>0),'product_id');
@@ -319,8 +316,6 @@ const pages = {
     const outWh=wh.filter(x=>x.stock_status==='Out of Stock').sort((a,b)=>String(a.product_name).localeCompare(String(b.product_name)));
     const recvUnits=sum(receiving,'quantity'),recvValue=sum(receiving,'total_cost'),recvTxn=distinctCount(receiving,'receiving_id');
     const trUnits=sum(transfers,'quantity'),trValue=sum(transfers,'total_value'),trTxn=distinctCount(transfers,'transfer_id');
-    const wasteUnits=sum(waste,'quantity'),wasteValue=sum(waste,'waste_value'),wasteTxn=distinctCount(waste,'id');
-    const movementTxn=distinctCount(movements,'transaction_key');
     const liveExpiry=state.expiry.filter(x=>Number(x.remaining_quantity)>0);
     const missingExpiry=liveExpiry.filter(x=>!x.expiry_date);
     const missingExpiryBatches=missingExpiry.length,missingExpiryUnits=sum(missingExpiry,'remaining_quantity');
@@ -331,66 +326,38 @@ const pages = {
       {label:'Low Stock',value:lowWh.length,color:COLORS.low},
       {label:'Out of Stock',value:outWh.length,color:COLORS.out}
     ];
-
     const productTotals=aggregateProductPositions(state.positions);
     const topValue=[...productTotals].filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,10).map(x=>({label:x.product_name,value:x.value}));
     const topQty=[...productTotals].filter(x=>x.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,10).map(x=>({label:x.product_name,value:x.quantity}));
-    const catUnits=groupSum(state.positions,'category_name','available_quantity').sort((a,b)=>b.value-a.value);
-    const catValue=groupSum(state.positions,'category_name','stock_value').sort((a,b)=>b.value-a.value);
-    const supplierValue=groupSum(state.positions,'supplier_name','stock_value').sort((a,b)=>b.value-a.value);
-    const supplierRecv=groupSum(receiving,'supplier_name','total_cost').sort((a,b)=>b.value-a.value);
-    const branchTr=groupSum(transfers,'to_branch','quantity').sort((a,b)=>b.value-a.value).map(x=>({...x,label:locationName(x.label)}));
-    const recvTrend=aggregateTrend(receiving,'date','quantity',from,to);
-    const wasteTrend=aggregateTrend(waste,'waste_date','quantity',from,to);
 
-    const movementMap=new Map();
-    for(const r of movements){const d=String(r.transaction_date||'').slice(0,10);if(!d)continue;if(!movementMap.has(d))movementMap.set(d,{date:d,inValue:0,outValue:0});const x=movementMap.get(d);x.inValue+=Number(r.quantity_in||0);x.outValue+=Number(r.quantity_out||0);}
-    const long=rangeDays(from,to)>62;
-    let movementTrend=[...movementMap.values()].sort((a,b)=>a.date.localeCompare(b.date));
-    if(long){const mm=new Map();for(const r of movementTrend){const k=monthKey(r.date);if(!mm.has(k))mm.set(k,{label:`${k.slice(5,7)}/${k.slice(0,4)}`,inValue:0,outValue:0});const x=mm.get(k);x.inValue+=r.inValue;x.outValue+=r.outValue;}movementTrend=[...mm.values()];}
-    else movementTrend=movementTrend.map(x=>({label:dateFmt(x.date),inValue:x.inValue,outValue:x.outValue}));
+    const dailyMap=new Map();
+    for(const r of receiving){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).inValue+=Number(r.quantity||0);}
+    for(const r of transfers){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).outValue+=Number(r.quantity||0);}
+    const activityTrend=[...dailyMap.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([,x])=>x);
 
-    const expiryRisk=[
-      {label:'Missing Expiry',value:missingExpiryBatches,color:COLORS.neutral},
-      {label:'Expired',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)<0).length,color:COLORS.waste},
-      {label:'0–3 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=3).length,color:COLORS.out},
-      {label:'4–7 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=4&&Number(x.days_until_expiry)<=7).length,color:COLORS.low},
-      {label:'8–14 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=8&&Number(x.days_until_expiry)<=14).length,color:COLORS.low},
-      {label:'Safe >14 Days',value:liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>14).length,color:COLORS.healthy}
-    ].filter(x=>x.value>0);
-
-    content.innerHTML=`${dashboardFilterHtml()}
-      <div class="quick-actions"><button class="btn primary" id="quickReceive">＋ Receive</button><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn" id="quickAdjust">± Adjustment</button><button class="btn" id="quickWaste">♲ Waste</button></div>
+    content.innerHTML=`
+      <div class="dash-section-head"><h3>Current Bakery Overview</h3><span>Live stock position · activity from 30/09/2026 to today</span></div>
       <div class="dash-pro-kpis">
         ${kpi('Bakery Warehouse Stock',qty(whUnits),`${money(whValue)} · ${whSku} available SKUs`,'good')}
         ${kpi('Total Inventory Value',money(totalValue),'All active physical locations','neutral')}
         ${kpi('Jeddah Shops Stock',qty(shopUnits),`${money(shopValue)} · ${shopSku} available SKUs`)}
-        ${kpi('Receiving in Selected Period',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
-        ${kpi('Transferred to Jeddah Shops',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
+        ${kpi('Receiving Since 30/09',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
+        ${kpi('Transfers Since 30/09',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
         ${kpi('Low Stock Alerts',qty(lowWh.length),'Bakery Warehouse thresholds','warn')}
         ${kpi('Out of Stock',qty(outWh.length),'Bakery Warehouse products','bad')}
         ${kpi('Missing Expiry',qty(missingExpiryBatches),`${qty(missingExpiryUnits)} units affected`,'bad')}
         ${kpi('Expiring ≤7 Days',qty(expSoon),'Live dated batches','warn')}
-        ${kpi('Waste in Selected Period',qty(wasteUnits),`${wasteTxn} records · ${money(wasteValue)}`,'bad')}
       </div>
       ${dashboardAttentionHtml(lowWh,outWh,missingExpiryBatches,missingExpiryUnits)}
-      <div class="dash-section-head"><h3>Stock & Valuation</h3><span>Live positions across active physical locations</span></div>
+      <div class="dash-section-head"><h3>Stock & Valuation</h3><span>Current live positions</span></div>
       <div class="chart-grid">${donutChart('Bakery Warehouse Stock Health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
-      <div class="chart-grid">${barChart('Stock Units by Category',catUnits,COLORS.neutral,qty)}${barChart('Stock Value by Category',catValue,COLORS.neutral,money)}</div>
-      <div class="chart-grid">${barChart('Stock Value by Supplier',supplierValue,COLORS.neutral,money)}${barChart('Top 10 Products by Stock Value',topValue,COLORS.neutral,money)}</div>
-      <div class="chart-grid">${barChart('Top 10 Products by Quantity',topQty,COLORS.neutral,qty)}${barChart('Expiry Risk — Live Batches',expiryRisk,COLORS.low,qty)}</div>
-      <div class="dash-section-head"><h3>Selected Period Activity</h3><span>${dateFmt(from)} — ${dateFmt(to)} · ${movementTxn} source transactions</span></div>
-      <div class="chart-grid">${trendChart('Receiving Trend — Units',recvTrend,COLORS.receiving,qty)}${dualTrendChart('Inventory Movement Trend',movementTrend,'Qty In','Qty Out')}</div>
-      <div class="chart-grid">${barChart('Supplier Receiving Value',supplierRecv,COLORS.receiving,money)}${barChart('Transfer Destination — Units',branchTr,COLORS.transfer,qty)}</div>
-      <div class="chart-grid">${trendChart('Waste Trend — Units',wasteTrend,COLORS.waste,qty)}${compareChart('Receiving vs Transfers — Units',[{label:'Receiving',value:recvUnits,color:COLORS.receiving},{label:'Transfers',value:trUnits,color:COLORS.transfer}])}</div>`;
-
-    $('#dashPreset').value=state.dashboardPreset;
-    $('#dashPreset').onchange=e=>{state.dashboardPreset=e.target.value;$('#dashCustom').classList.toggle('hidden',e.target.value!=='custom');if(e.target.value!=='custom')go('dashboard');};
-    if($('#dashApply'))$('#dashApply').onclick=()=>{const f=$('#dashFrom').value,t=$('#dashTo').value;if(!f||!t||f>t)return toast('Choose a valid custom date range','error');state.dashboardCustom={from:f,to:t};state.dashboardPreset='custom';go('dashboard');};
-    $('#quickReceive').onclick=openReceiving;$('#quickTransfer').onclick=openTransfer;$('#quickAdjust').onclick=openAdjustment;$('#quickWaste').onclick=openWaste;
-    $$('[data-attention-page]').forEach(b=>b.onclick=()=>go(b.dataset.attentionPage));
+      <div class="chart-grid">${barChart('Top 10 Products by Stock Value',topValue,COLORS.neutral,money)}${barChart('Top 10 Products by Quantity',topQty,COLORS.neutral,qty)}</div>
+      <div class="dash-section-head"><h3>Receiving & Transfer Activity</h3><span>30/09/2026 — ${dateFmt(to)} · daily units</span></div>
+      ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
+    `;
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
+  },or');
   },
 
   async stock(){
