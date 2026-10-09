@@ -295,7 +295,8 @@ function dashboardAttentionHtml(lowRows,outRows,missingBatches,missingUnits){
   return `<div class="attention-panel"><div class="attention-head"><strong>Operations Attention</strong><span>${rows.length} items requiring review</span></div>${rows.length?`<div class="attention-list">${rows.map(r=>`<div class="attention-row"><i class="attention-dot" style="background:${r.color}"></i><div class="attention-title">${esc(r.title)}</div><div class="attention-meta">${esc(r.meta)}</div><button class="btn small-btn" data-attention-page="${r.page}">${esc(r.action)}</button></div>`).join('')}</div>`:'<div class="attention-empty">No attention items in current stock.</div>'}</div>`;
 }
 
-const   async dashboard(){
+const pages = {
+  async dashboard(){
     ensureDashboardProStyles();
     const from='2026-09-30';
     const to=isoToday();
@@ -357,7 +358,6 @@ const   async dashboard(){
     `;
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
-  },or');
   },
 
   async stock(){
