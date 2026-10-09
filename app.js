@@ -690,7 +690,7 @@ function monthlyCols(){return [{key:'month',label:'Month'},{key:'transactions',l
 function groupCols(label){return [{key:'group',label},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
 
 $('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');$('#refreshBtn').onclick=async()=>{try{await requireData(true);await go(state.currentPage);}catch(e){fail(e,'Refresh failed');}};$('#logoutBtn').onclick=async()=>{await supabase.auth.signOut();};
-$('#loginForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter||$('#loginForm button[type="submit"]'),old=btn.textContent;btn.disabled=true;btn.textContent='Signing in…';const status=$('#loginStatus');if(status){status.textContent='Connecting to the inventory…';status.classList.remove('hidden');}try{assertOnline();const {data,error}=await supabase.auth.signInWithPassword({email:$('#loginEmail').value.trim(),password:$('#loginPassword').value});if(error)throw error;if(!data?.session)throw new Error('Sign-in returned no session. Please try again.');await boot(data.session);if(!state.session||!state.appUser)throw new Error('You signed in, but the inventory account did not finish loading. Check that your account is active and try again.');}catch(err){if(status){status.textContent=err?.message||String(err);status.classList.remove('hidden');}fail(err,'Sign in failed');}finally{btn.disabled=false;btn.textContent=old;}};
+$('#loginForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter||$('#loginForm button[type="submit"]'),old=btn.textContent;btn.disabled=true;btn.textContent='Signing in…';const status=$('#loginStatus');if(status){status.textContent='Checking your email and password…';status.classList.remove('hidden');}try{assertOnline();const email=$('#loginEmail').value.trim();const password=$('#loginPassword').value;if(!email||!password)throw new Error('Enter your email and password.');const {data,error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;if(!data?.session)throw new Error('Sign-in returned no session. Please try again.');await boot(data.session);if(!state.session||!state.appUser)throw new Error('Sign-in succeeded, but your bakery account could not be loaded. Check that the account is active, then try again.');}catch(err){if(status){status.textContent=err?.message||String(err);status.classList.remove('hidden');}fail(err,'Sign in failed');}finally{btn.disabled=false;btn.textContent=old;}};
 $('#resetPasswordBtn').onclick=async()=>{const email=$('#loginEmail').value.trim();if(!email)return toast('Enter your email first','error');try{assertOnline();const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:`${location.origin}${location.pathname}`});if(error)throw error;toast('Password reset email sent','success');}catch(e){fail(e,'Password reset failed');}};
 $('#recoveryForm').onsubmit=async e=>{e.preventDefault();const p=$('#newPassword').value,c=$('#confirmPassword').value;if(p.length<8)return toast('Use at least 8 characters','error');if(p!==c)return toast('Passwords do not match','error');const btn=e.submitter,old=btn.textContent;btn.disabled=true;btn.textContent='Updating…';try{assertOnline();const {error}=await supabase.auth.updateUser({password:p});if(error)throw error;toast('Password updated. Sign in with your new password.','success');recoveryMode=false;await supabase.auth.signOut();showLogin();}catch(err){fail(err,'Password update failed');}finally{btn.disabled=false;btn.textContent=old;}};
 function showLogin(){recoveryMode=false;$('#loginForm').classList.remove('hidden');$('#resetPasswordBtn').classList.remove('hidden');$('#recoveryForm').classList.add('hidden');}
@@ -698,10 +698,23 @@ function showRecovery(){recoveryMode=true;authView.classList.remove('hidden');ap
 
 async function boot(session){
   const seq=++bootSequence;state.session=session;
-  if(!session){if(!recoveryMode)showLogin();authView.classList.remove('hidden');appView.classList.add('hidden');state.appUser=null;return;}
+  if(!session){state.appUser=null;if(!recoveryMode)showLogin();authView.classList.remove('hidden');appView.classList.add('hidden');return;}
   if(recoveryMode){showRecovery();return;}
-  authView.classList.add('hidden');appView.classList.remove('hidden');
-  try{await loadAppUser();if(seq!==bootSequence)return;await requireData(true);if(seq!==bootSequence)return;renderNav();await go(state.currentPage);}catch(e){if(seq===bootSequence)fail(e,'Could not load account');}
+  // Keep the sign-in screen available until the account and its data are confirmed.
+  authView.classList.remove('hidden');appView.classList.add('hidden');
+  const status=$('#loginStatus');
+  try{
+    await loadAppUser();if(seq!==bootSequence)return;
+    await requireData(true);if(seq!==bootSequence)return;
+    authView.classList.add('hidden');appView.classList.remove('hidden');
+    renderNav();await go(state.currentPage);
+  }catch(e){
+    if(seq!==bootSequence)return;
+    state.appUser=null;
+    authView.classList.remove('hidden');appView.classList.add('hidden');
+    if(status){status.textContent='Could not finish loading your bakery account: '+(e?.message||String(e));status.classList.remove('hidden');}
+    fail(e,'Could not load account');
+  }
 }
 window.addEventListener('online',()=>{updateNetworkStatus();toast('Connection restored','success');});
 window.addEventListener('offline',()=>{updateNetworkStatus();toast('You are offline. Do not submit transactions.','error');});
