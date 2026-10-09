@@ -82,7 +82,7 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', async () => {
         try {
-          const registration = await navigator.serviceWorker.register('./sw.js?v=20261009-2', { updateViaCache: 'none' });
+          const registration = await navigator.serviceWorker.register('./sw.js?v=20261009-3', { updateViaCache: 'none' });
           await registration.update();
         } catch (error) {
           console.warn('PWA update check failed', error);
@@ -97,6 +97,6 @@
       });
     }
   </script>
-  <script type="module" src="./app.js?v=20261009-3"></script>
+  <script type="module" src="./app.js?v=20261009-4"></script>
 </body>
 </html>
