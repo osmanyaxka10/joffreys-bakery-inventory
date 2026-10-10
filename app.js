@@ -332,14 +332,14 @@ const AUDIT_OPENING_STOCK={
   'english dates cake':45,'english lemon cake':55,'tiramisu':30,'carrot cake':10,'carrot cheesecake':10,'sacher cake':30,
   'blueberry cheese cake':36,'lotus cheese cake':24,'croissant chocolate':26,'croissant plain':28,'croissant white cheese':90,'croissant cheese yellow':90,
   'cookies chocolate':297,'cookies vanilla':545,'muffin chocolate':35,'muffin blueberry':13,'halloumi pesto baguette':31,'fajita wrap':163,
-  'turkey & cheese baguette':48,'fajita small':95,'turkey cheese small':25,'tuna small':25,'halloumi small':15,
+  'turkey cheese baguette':48,'fajita small':95,'turkey cheese small':25,'tuna small':25,'halloumi small':15,
   'ranch club':30,'caesar club':30,'3 cheese club':30,'lotus pudding':2,'kunafa pudding':5,'cookies pudding':3,'chocolate pudding':1,
-  'ice cream chocolate':14,'date cheese cake':10
+  'ice cream chocolate':14
 };
 function auditBaseline(productName){
   const key=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
   if(Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,key))return AUDIT_OPENING_STOCK[key];
-  const aliases={'turkey and cheese baguette':'turkey & cheese baguette','three cheese club':'3 cheese club','blueberry cheesecake':'blueberry cheese cake','lotus cheesecake':'lotus cheese cake'};
+  const aliases={'turkey and cheese baguette':'turkey cheese baguette','three cheese club':'3 cheese club','blueberry cheesecake':'blueberry cheese cake','lotus cheesecake':'lotus cheese cake'};
   const alias=aliases[key];return alias&&Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,alias)?AUDIT_OPENING_STOCK[alias]:null;
 }
 async function loadAuditDifferenceRows(toDate=isoToday()){
@@ -366,10 +366,10 @@ async function loadAuditDifferenceRows(toDate=isoToday()){
     return {...p,opening,audit_difference:difference,expected,actual,variance:expected===null?null:actual-expected};
   }).sort((a,b)=>a.product_name.localeCompare(b.product_name));
 }
-function auditDifferencePanel(id,title='Quick Find — Audit Difference'){
-  return `<section class="panel audit-quick-panel"><div class="dash-section-head"><h3>${esc(title)}</h3><span>Bakery Warehouse · baseline 30/09/2026</span></div><div class="audit-quick-controls"><label>Quick find product<input id="${id}Search" type="search" placeholder="Type product name or SKU…"></label><button id="${id}Refresh" class="btn">Refresh audit</button></div><p class="muted small" id="${id}Note">Loading real receiving, transfer, waste, adjustment and current-stock records…</p><div id="${id}Table" class="table-wrap"><div class="panel loading">Loading audit data…</div></div></section>`;
+function auditDifferencePanel(id,title='Quick Find — Audit Difference',toDate=isoToday()){
+  return `<section class="panel audit-quick-panel"><div class="dash-section-head"><h3>${esc(title)}</h3><span>Bakery Warehouse · 30/09/2026 — ${esc(dateFmt(toDate))}</span></div><div class="audit-quick-controls"><label>Quick find product<input id="${id}Search" type="search" placeholder="Type product name or SKU…"></label><button id="${id}Refresh" class="btn">Refresh audit</button></div><p class="muted small" id="${id}Note">Loading real receiving, transfer, waste, adjustment and current-stock records…</p><div id="${id}Table" class="table-wrap"><div class="panel loading">Loading audit data…</div></div></section>`;
 }
-async function wireAuditDifferencePanel(id){
+async function wireAuditDifferencePanel(id,toDate=isoToday()){
   const search=$('#'+id+'Search'),host=$('#'+id+'Table'),note=$('#'+id+'Note'),refresh=$('#'+id+'Refresh');
   if(!search||!host||!note||!refresh)return;
   let rows=[];
@@ -380,7 +380,7 @@ async function wireAuditDifferencePanel(id){
     host.innerHTML=`<table class="data-table"><thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${found.length?found.map(r=>`<tr>${cols.map(([k])=>{const v=r[k];let s=v===null?'Baseline missing':qty(v);if(k==='product_name')s=esc(v);if(k==='product_code')s=esc(v);if(k==='variance'&&v!==null)s=(v>0?'+':'')+qty(v);return `<td class="${['opening','received','transferred','audit_difference','expected','actual','variance'].includes(k)?'num':''} ${k==='variance'&&v!==null&&Math.abs(v)>0.00001?'audit-variance':''}">${s}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${cols.length}" class="empty">No matching products.</td></tr>`}</tbody></table>`;
     note.textContent=`${found.length} products · received minus transferred is shown separately from stock variance. “Baseline missing” means the 30/09 opening count is not recorded in the app's verified baseline list.`;
   };
-  const load=async()=>{refresh.disabled=true;note.textContent='Refreshing live Supabase records…';try{rows=await loadAuditDifferenceRows();draw();}catch(e){host.innerHTML=`<div class="panel empty">Audit could not load: ${esc(e?.message||String(e))}</div>`;note.textContent='Check access to receiving, transfer, waste and adjustment records.';}finally{refresh.disabled=false;}};
+  const load=async()=>{refresh.disabled=true;note.textContent='Refreshing live Supabase records…';try{rows=await loadAuditDifferenceRows(toDate);draw();}catch(e){host.innerHTML=`<div class="panel empty">Audit could not load: ${esc(e?.message||String(e))}</div>`;note.textContent='Check access to receiving, transfer, waste and adjustment records.';}finally{refresh.disabled=false;}};
   search.oninput=draw;refresh.onclick=load;await load();
 }
 
@@ -746,7 +746,7 @@ function reportDateGroups(rows,dateKey){
 }
 async function runReport(){
   const type=$('#reportType').value,from=$('#reportFrom').value,to=$('#reportTo').value;if(from&&to&&from>to)return toast('Invalid report date range','error');const host=$('#reportResult');
-  if(type==='audit_difference'){host.innerHTML=auditDifferencePanel('reportAudit','Quick Find — Audit Difference');await wireAuditDifferencePanel('reportAudit');return;}
+  if(type==='audit_difference'){host.innerHTML=auditDifferencePanel('reportAudit','Quick Find — Audit Difference',to);await wireAuditDifferencePanel('reportAudit',to);return;}
   host.innerHTML='<div class="panel loading">Running report…</div>';
   try{
     const result=await reportDefinition(type,from,to);
