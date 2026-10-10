@@ -31,15 +31,23 @@ const state = {
 };
 
 const navItems = [
+  ['__g','','Overview'],
   ['dashboard','▦','Dashboard'],
+  ['__g','','Operations'],
+  ['receiving','↓','Receiving'],
+  ['scan','⎙','Scan Invoice'],
+  ['transfers','⇄','Transfers'],
+  ['replenishment','⚡','Replenishment'],
+  ['__g','','Inventory'],
   ['stock','▤','Stock'],
   ['movements','≋','Movements'],
-  ['receiving','↓','Receiving'],
-  ['transfers','⇄','Transfers'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
+  ['__g','','Insights'],
   ['reports','▥','Reports'],
+  ['history','◔','Daily History'],
+  ['__g','','Master Data'],
   ['suppliers','♟','Suppliers'],
   ['products','□','Products']
 ];
@@ -55,7 +63,10 @@ const pageMeta = {
   expiry:['Expiry','Batch expiry risk and FEFO visibility'],
   reports:['Reports','Daily, monthly and management reporting'],
   suppliers:['Suppliers','Supplier activity using real data'],
-  products:['Products','Real Supabase product master']
+  products:['Products','Real Supabase product master'],
+  scan:['Scan Invoice','Read a supplier invoice photo and draft the receiving automatically'],
+  replenishment:['Replenishment','Automatic transfer and supplier-order suggestions from real usage'],
+  history:['Daily History','Automatic nightly stock snapshots and value trend']
 };
 
 const COLORS = {
@@ -179,7 +190,7 @@ async function loadAppUser(){
 
 function renderNav(){
   const navList = Array.isArray(navItems) ? navItems : navItems ? [navItems] : [];
-  $('#nav').innerHTML=navList.map(([id,ico,label,href])=>`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
+  $('#nav').innerHTML=navList.map(([id,ico,label,href])=>id==='__g'?`<div class="nav-group">${label}</div>`:`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
   const navButtonsValue = Array.from(document.querySelectorAll('#nav button'));
   const navButtons = Array.isArray(navButtonsValue) ? navButtonsValue : navButtonsValue ? [navButtonsValue] : [];
   navButtons.forEach(b=>b.onclick=()=>{if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
@@ -383,6 +394,44 @@ async function wireAuditDifferencePanel(id,toDate=isoToday()){
   const load=async()=>{refresh.disabled=true;note.textContent='Refreshing live Supabase records…';try{rows=await loadAuditDifferenceRows(toDate);draw();}catch(e){host.innerHTML=`<div class="panel empty">Audit could not load: ${esc(e?.message||String(e))}</div>`;note.textContent='Check access to receiving, transfer, waste and adjustment records.';}finally{refresh.disabled=false;}};
   search.oninput=draw;refresh.onclick=load;await load();
 }
+const WHOLE_CAKE_PIECES=10;
+async function fileToBase64(file,maxSide=1800){
+  const bmp=await createImageBitmap(file);const sc=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.85).split(',')[1];
+}
+async function scanInvoiceFlow(){
+  const f=$('#scanFile').files[0];const out=$('#scanOut');if(!f)return toast('Choose an invoice photo first','error');
+  out.innerHTML='<p class="muted">Reading invoice…</p>';
+  try{
+    const image=await fileToBase64(f);
+    const {data:prods}=await supabase.from('products').select('id,product_code,name,unit_cost').eq('is_active',true);
+    const {data,error}=await supabase.functions.invoke('scan-invoice',{body:{image,products:(prods||[]).map(p=>({id:p.id,code:p.product_code,name:p.name}))}});
+    if(error)throw error;if(data?.error)throw new Error(data.error);
+    renderScanReview(data,prods||[]);
+  }catch(e){out.innerHTML=`<p class="error-text">Could not read the invoice: ${esc(e.message||e)}</p>`;}
+}
+function renderScanReview(d,prods){
+  const out=$('#scanOut');const date=d.date||new Date().toISOString().slice(0,10);
+  const addDays=(ds,n)=>{const x=new Date(ds+'T00:00:00Z');x.setUTCDate(x.getUTCDate()+n);return x.toISOString().slice(0,10);};
+  const lines=(d.lines||[]).map(l=>{const p=prods.find(p=>p.id===l.product_id);const whole=/^j-/i.test(l.invoice_code||'');const muffin=/muffin/i.test(p?.name||'');
+    return {product_id:l.product_id,name:p?.name||'⚠ not matched',invoice_name:l.invoice_name,qty:whole?Number(l.quantity)*WHOLE_CAKE_PIECES:Number(l.quantity),cost:whole?Number(l.unit_price)/WHOLE_CAKE_PIECES:Number(l.unit_price),expiry:addDays(date,muffin?60:6),whole};});
+  out.innerHTML=`<div class="form-grid"><label>Invoice No<input id="scInv" value="${esc(d.invoice_no||'')}"></label><label>Date<input id="scDate" type="date" value="${esc(date)}"></label></div>
+    <div class="table-card"><table class="data-table"><thead><tr><th>Invoice item</th><th>Matched product</th><th>Qty</th><th>Unit cost</th><th>Expiry</th></tr></thead><tbody>${lines.map((l,i)=>`<tr data-i="${i}"><td>${esc(l.invoice_name||'')}${l.whole?' <span class="pill">whole cake ×'+WHOLE_CAKE_PIECES+'</span>':''}</td><td>${esc(l.name)}</td><td><input class="sc-qty" type="number" step="any" value="${l.qty}"></td><td><input class="sc-cost" type="number" step="any" value="${l.cost}"></td><td><input class="sc-exp" type="date" value="${l.expiry}"></td></tr>`).join('')}</tbody></table></div>
+    <p class="small muted">Supplier: Devon · Location: Bakery Warehouse. Invoice total read: ${money(d.total_before_vat)} (before VAT). Check it equals the sum below.</p>
+    <p id="scSum" class="small"></p><button class="btn primary" id="scPost">Confirm &amp; post receiving</button>`;
+  const sum=()=>{let t=0;$$('tr[data-i]',out).forEach(r=>t+=Number($('.sc-qty',r).value||0)*Number($('.sc-cost',r).value||0));$('#scSum').textContent='Receiving value: '+money(t);};
+  out.addEventListener('input',sum);sum();
+  $('#scPost').onclick=async()=>{
+    const items=$$('tr[data-i]',out).map(r=>{const l=lines[+r.dataset.i];return {product_id:l.product_id,quantity:Number($('.sc-qty',r).value),unit_cost:Number($('.sc-cost',r).value),expiry_date:$('.sc-exp',r).value};});
+    if(items.some(i=>!i.product_id))return toast('Some lines are not matched to a product','error');
+    const inv=$('#scInv').value.trim();if(!inv)return toast('Invoice number is required','error');
+    const {data:wh}=await supabase.from('branches').select('id').eq('name','Warehouse').single();
+    const {data:sup}=await supabase.from('suppliers').select('id').eq('name','Devon').single();
+    const {error}=await supabase.rpc('post_receiving',{p_received_date:$('#scDate').value,p_reference_no:inv,p_invoice_no:inv,p_supplier_id:sup.id,p_branch_id:wh.id,p_items:items,p_notes:'Devon invoice '+inv,p_posting_key:crypto.randomUUID()});
+    if(error)return toast(error.message,'error');toast('Receiving posted');go('receiving');
+  };
+}
 
 const pages = {
   async dashboard(){
@@ -531,6 +580,34 @@ const pages = {
     ],{filters:[{key:'branch_name',label:'Location',type:'location'},{key:'changed_by_name',label:'Changed By'}],filename:'joffreys-expiry-corrections',title:'Joffrey’s Bakery Expiry Correction Audit',pageSize:25});
   },
 
+  async replenishment(){
+    const {data,error}=await supabase.rpc('replenishment_suggestions');if(error)throw error;
+    const rows=(data||[]).map(r=>({...r,branch_label:locationName(r.branch_name)}));
+    const tr=rows.filter(r=>Number(r.suggested_transfer)>0), od=[...new Map(rows.filter(r=>Number(r.suggested_order)>0).map(r=>[r.product_id,r])).values()];
+    content.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Transfers to send',qty(tr.length),'Products below 2 days of branch cover','blue')}${kpi('Units to transfer',qty(tr.reduce((a,r)=>a+Number(r.suggested_transfer),0)),'Warehouse to branch','purple')}${kpi('Products to order',qty(od.length),'Warehouse below 3 days of cover','neutral')}</div>
+      <div class="info-banner">Suggestions use the last 14 days of warehouse-to-branch transfers as daily demand. Branch target = 2 days of cover, warehouse target = 3 days of cover. They update automatically as stock changes.</div>
+      <div class="dash-section-head"><h3>Suggested transfers</h3><span>Warehouse to branch</span></div><div id="repTransfer"></div>
+      <div class="dash-section-head"><h3>Suggested supplier order</h3><span>Warehouse stock vs demand</span></div><div id="repOrder"></div>`;
+    renderDataTable('#repTransfer',tr,[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_label',label:'To'},{key:'branch_stock',label:'Branch Stock',type:'qty',align:'right'},{key:'warehouse_stock',label:'Warehouse Stock',type:'qty',align:'right'},{key:'avg_daily_demand',label:'Avg / Day',type:'qty',align:'right'},{key:'suggested_transfer',label:'Suggested Qty',type:'qty',align:'right'}],{filename:'joffreys-suggested-transfers',title:'Joffrey’s Bakery Suggested Transfers',pageSize:100});
+    renderDataTable('#repOrder',od,[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'warehouse_stock',label:'Warehouse Stock',type:'qty',align:'right'},{key:'warehouse_avg_daily',label:'Avg / Day',type:'qty',align:'right'},{key:'suggested_order',label:'Suggested Order',type:'qty',align:'right'}],{filename:'joffreys-suggested-order',title:'Joffrey’s Bakery Suggested Supplier Order',pageSize:100});
+  },
+
+  async history(){
+    const {data,error}=await supabase.from('daily_stock_snapshots').select('snapshot_date,branch_id,quantity,value').order('snapshot_date',{ascending:false}).limit(20000);if(error)throw error;
+    const by=new Map();(data||[]).forEach(r=>{const o=by.get(r.snapshot_date)||{date:r.snapshot_date,units:0,value:0};o.units+=Number(r.quantity||0);o.value+=Number(r.value||0);by.set(r.snapshot_date,o);});
+    const days=[...by.values()].sort((a,b)=>a.date<b.date?1:-1);
+    const last=[...days].slice(0,14).reverse();
+    content.innerHTML=`<div class="info-banner">A full stock snapshot is saved automatically every night at 23:55 (Riyadh). No action needed.</div>
+      <div class="chart-grid">${trendChart('Inventory value by day (SAR)',last.map(d=>({label:dateFmt(d.date),value:d.value})),COLORS.receiving,v=>num(v,0))}${trendChart('Units in stock by day',last.map(d=>({label:dateFmt(d.date),value:d.units})),COLORS.transfer)}</div>
+      <div class="dash-section-head"><h3>Snapshots</h3><span>${days.length} day(s)</span></div><div id="histTable"></div>`;
+    renderDataTable('#histTable',days,[{key:'date',label:'Date',type:'date'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}],{filename:'joffreys-daily-history',title:'Joffrey’s Bakery Daily History',pageSize:60});
+  },
+
+  async scan(){
+    content.innerHTML=`<div class="panel scan-panel"><h3>Scan a supplier invoice</h3><p class="muted">Take or choose a photo of the Devon invoice. The app reads every line, matches your products and drafts the receiving. You review and confirm before anything is saved.</p>
+      <input id="scanFile" type="file" accept="image/*" capture="environment" /> <button class="btn primary" id="scanBtn" ${canPost()?'':'disabled'}>Read invoice</button><div id="scanOut" class="scan-out"></div></div>`;
+    $('#scanBtn').onclick=scanInvoiceFlow;
+  },
   async reports(){renderReportsShell();},
 
   async suppliers(){
