@@ -476,28 +476,57 @@ const pages = {
     for(const r of transfers){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).outValue+=Number(r.quantity||0);}
     const activityTrend=[...dailyMap.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([,x])=>x);
 
+    const [repR,varR,snapR]=await Promise.allSettled([
+      supabase.rpc('replenishment_suggestions'),
+      supabase.rpc('variance_report',{p_branch_id:(state.branches.find(b=>b.name==='Warehouse')||{}).id||1}),
+      supabase.from('daily_stock_snapshots').select('snapshot_date,quantity,value').order('snapshot_date',{ascending:false}).limit(20000)
+    ]);
+    const rep=(repR.status==='fulfilled'&&!repR.value.error?repR.value.data:[])||[];
+    const trSug=rep.filter(r=>Number(r.suggested_transfer)>0),orderSug=[...new Set(rep.filter(r=>Number(r.suggested_order)>0).map(r=>r.product_id))];
+    const varRows=(varR.status==='fulfilled'&&!varR.value.error?varR.value.data:[])||[];
+    const audVars=varRows.map(r=>{const o=auditBaseline(r.product_name);return o===null?0:Number(r.system_qty)-(o+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments));}).filter(v=>v!==0);
+    const audNet=audVars.reduce((a,b)=>a+b,0);
+    const snapBy=new Map();((snapR.status==='fulfilled'&&!snapR.value.error?snapR.value.data:[])||[]).forEach(r=>{const o=snapBy.get(r.snapshot_date)||{date:r.snapshot_date,units:0,value:0};o.units+=Number(r.quantity||0);o.value+=Number(r.value||0);snapBy.set(r.snapshot_date,o);});
+    const snaps=[...snapBy.values()].sort((a,b)=>a.date<b.date?-1:1).slice(-14);
+    const prevVal=snaps.length>1?snaps[snaps.length-2].value:null;
+    const dVal=prevVal===null?null:totalValue-prevVal;
+    const expired=liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)<0),exp3=liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=3);
+    const expiredUnits=sum(expired,'remaining_quantity'),exp3Units=sum(exp3,'remaining_quantity');
+    const exp7=liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>3&&Number(x.days_until_expiry)<=7),expLater=liveExpiry.filter(x=>x.expiry_date&&Number(x.days_until_expiry)>7);
+    const expiryRisk=[{label:'Expired',value:sum(expired,'remaining_quantity'),color:COLORS.waste},{label:'≤ 3 days',value:exp3Units,color:COLORS.out},{label:'4–7 days',value:sum(exp7,'remaining_quantity'),color:COLORS.low},{label:'> 7 days',value:sum(expLater,'remaining_quantity'),color:COLORS.healthy},{label:'No expiry',value:missingExpiryUnits,color:COLORS.neutral}];
+    const todayStr=isoToday();const tRecv=receiving.filter(r=>String(r.date).slice(0,10)===todayStr),tTr=transfers.filter(r=>String(r.date).slice(0,10)===todayStr);
+    const actions=[
+      expired.length&&{lvl:3,ico:'⛔',t:`${qty(expiredUnits)} expired units`,m:`${expired.length} batches past expiry — record waste`,go:'expiry',b:'Review'},
+      exp3.length&&{lvl:2,ico:'⏳',t:`${qty(exp3Units)} units expire within 3 days`,m:`${exp3.length} batches`,go:'expiry',b:'Plan'},
+      outWh.length&&{lvl:2,ico:'📉',t:`${outWh.length} products out of stock`,m:'Bakery Warehouse',go:'stock',b:'View'},
+      lowWh.length&&{lvl:1,ico:'⚠',t:`${lowWh.length} products low in stock`,m:'Bakery Warehouse thresholds',go:'stock',b:'View'},
+      missingExpiryBatches&&{lvl:2,ico:'📅',t:`${missingExpiryBatches} batches missing expiry`,m:`${qty(missingExpiryUnits)} units — update real dates`,go:'expiry',b:'Fix'},
+      audVars.length&&{lvl:2,ico:'±',t:`${audVars.length} products with audit variance`,m:`Net ${audNet>0?'+':audNet<0?'−':''}${qty(Math.abs(audNet))} units vs verified 30/09`,go:'variance',b:'Check'},
+      trSug.length&&{lvl:1,ico:'⇄',t:`${trSug.length} suggested transfers`,m:`${qty(trSug.reduce((a,r)=>a+Number(r.suggested_transfer),0))} units to send to branches`,go:'replenishment',b:'Open'},
+      orderSug.length&&{lvl:1,ico:'🛒',t:`${orderSug.length} products to order`,m:'Warehouse below 3 days of cover',go:'replenishment',b:'Open'}
+    ].filter(Boolean).sort((a,b)=>b.lvl-a.lvl);
+    const deltaTxt=dVal===null?'':`<span class="delta ${dVal>=0?'up':'down'}">${dVal>=0?'▲':'▼'} ${money(Math.abs(dVal))} vs last night</span>`;
+    const hr=new Date().getHours();const greet=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
     content.innerHTML=`
-      <div class="dash-section-head"><h3>Current Bakery Overview</h3><span>Live stock position · activity from 30/09/2026 to today</span></div>
+      <div class="dash-hero"><div><h2>${greet}, ${esc((state.appUser?.name||'').split(' ')[0]||'team')}</h2><p>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · Joffrey’s Bakery Jeddah</p></div>
+        <div class="dash-hero-stats"><div><span>Inventory value</span><strong>${money(totalValue)}</strong>${deltaTxt}</div><div><span>Today in</span><strong>${qty(sum(tRecv,'quantity'))}</strong><small>${distinctCount(tRecv,'receiving_id')} receipts</small></div><div><span>Today out</span><strong>${qty(sum(tTr,'quantity'))}</strong><small>${distinctCount(tTr,'transfer_id')} transfers</small></div></div></div>
+      <div class="dash-section-head"><h3>Action center</h3><span>${actions.length?actions.length+' item(s) need attention':'All clear'}</span></div>
+      <div class="action-grid">${actions.length?actions.map(a=>`<button class="action-card lvl${a.lvl}" data-go="${a.go}"><span class="action-ico">${a.ico}</span><span class="action-body"><strong>${esc(a.t)}</strong><small>${esc(a.m)}</small></span><span class="action-btn">${a.b} ›</span></button>`).join(''):'<div class="action-card lvl0"><span class="action-ico">✓</span><span class="action-body"><strong>Everything is in order</strong><small>No expiry, stock or variance issues right now</small></span></div>'}</div>
+      <div class="dash-section-head"><h3>Stock position</h3><span>Live from Supabase</span></div>
       <div class="dash-pro-kpis">
-        ${kpi('Bakery Warehouse Stock',qty(whUnits),`${money(whValue)} · ${whSku} available SKUs`,'good')}
-        ${kpi('Total Inventory Value',money(totalValue),'All active physical locations','neutral')}
-        ${kpi('Jeddah Shops Stock',qty(shopUnits),`${money(shopValue)} · ${shopSku} available SKUs`)}
-        ${kpi('Receiving Since 30/09',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
-        ${kpi('Transfers Since 30/09',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
-        ${kpi('Low Stock Alerts',qty(lowWh.length),'Bakery Warehouse thresholds','warn')}
-        ${kpi('Out of Stock',qty(outWh.length),'Bakery Warehouse products','bad')}
-        ${kpi('Missing Expiry',qty(missingExpiryBatches),`${qty(missingExpiryUnits)} units affected`,'bad')}
-        ${kpi('Expiring ≤7 Days',qty(expSoon),'Live dated batches','warn')}
+        ${kpi('Bakery Warehouse',qty(whUnits),`${money(whValue)} · ${whSku} SKUs`,'good')}
+        ${kpi('Jeddah Shops',qty(shopUnits),`${money(shopValue)} · ${shopSku} SKUs`)}
+        ${kpi('Receiving since 30/09',qty(recvUnits),`${recvTxn} receipts · ${money(recvValue)}`,'blue')}
+        ${kpi('Transfers since 30/09',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
+        ${kpi('Expiring ≤ 7 days',qty(exp3.length+exp7.length),`${qty(exp3Units+sum(exp7,'remaining_quantity'))} units`,'warn')}
       </div>
-      ${dashboardAttentionHtml(lowWh,outWh,missingExpiryBatches,missingExpiryUnits)}
-      <div class="dash-section-head"><h3>Stock & Valuation</h3><span>Current live positions</span></div>
-      <div class="chart-grid">${donutChart('Bakery Warehouse Stock Health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
-      <div class="chart-grid">${barChart('Top 10 Products by Stock Value',topValue,COLORS.neutral,money)}${barChart('Top 10 Products by Quantity',topQty,COLORS.neutral,qty)}</div>
-      <div class="dash-section-head"><h3>Receiving & Transfer Activity</h3><span>30/09/2026 — ${dateFmt(to)} · daily units</span></div>
+      <div class="chart-grid">${snaps.length>1?trendChart('Inventory value — last nights (SAR)',snaps.map(d=>({label:dateFmt(d.date),value:d.value})),COLORS.receiving,v=>num(v,0)):`<div class="chart-card"><div class="chart-title">Inventory value trend</div><div class="empty chart-empty">Builds up automatically — one point per night</div></div>`}${donutChart('Expiry risk (units)',expiryRisk)}</div>
+      <div class="chart-grid">${donutChart('Bakery Warehouse stock health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
+      <div class="dash-section-head"><h3>Activity</h3><span>30/09/2026 — ${dateFmt(to)} · daily units</span></div>
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
-      ${auditDifferencePanel('dashAudit')}
+      <div class="chart-grid">${barChart('Top 10 products by stock value',topValue,COLORS.neutral,money)}${barChart('Top 10 products by quantity',topQty,COLORS.neutral,qty)}</div>
     `;
-    await wireAuditDifferencePanel('dashAudit');
+    $$('.action-card[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
