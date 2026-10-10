@@ -41,6 +41,7 @@ const navItems = [
   ['__g','','Inventory'],
   ['stock','▤','Stock'],
   ['movements','≋','Movements'],
+  ['variance','±','Variance'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
@@ -64,6 +65,7 @@ const pageMeta = {
   reports:['Reports','Daily, monthly and management reporting'],
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
+  variance:['Variance','Counted stock against the system: over (+) and short (−) by product'],
   scan:['Scan Invoice','Read a supplier invoice photo and draft the receiving automatically'],
   replenishment:['Replenishment','Automatic transfer and supplier-order suggestions from real usage'],
   history:['Daily History','Automatic nightly stock snapshots and value trend']
@@ -578,6 +580,51 @@ const pages = {
       {key:'changed_at',label:'Changed At',type:'datetime'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'batch_id',label:'Batch ID'},
       {key:'old_expiry_date',label:'Old Expiry',type:'date'},{key:'new_expiry_date',label:'New Expiry',type:'date'},{key:'old_batch_no',label:'Old Batch'},{key:'new_batch_no',label:'New Batch'},{key:'changed_by_name',label:'Changed By'},{key:'reason',label:'Reason'}
     ],{filters:[{key:'branch_name',label:'Location',type:'location'},{key:'changed_by_name',label:'Changed By'}],filename:'joffreys-expiry-corrections',title:'Joffrey’s Bakery Expiry Correction Audit',pageSize:25});
+  },
+
+  async variance(){
+    const physical=state.branches.filter(b=>b.is_active!==false);
+    const wh=physical.find(b=>b.name==='Warehouse')||physical[0];
+    content.innerHTML=`<div class="report-controls"><label>Location<select id="vBranch">${physical.map(b=>`<option value="${b.id}" ${b.id===wh.id?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label><label>Show<select id="vFilter"><option value="all">All products</option><option value="var">Only variances</option><option value="uncounted">Not counted yet</option></select></label><label>Search<input id="vSearch" placeholder="Product or SKU"></label><button class="btn" id="vExcel">Excel</button></div>
+      <div id="vKpis"></div><div id="vExp" class="info-banner hidden"></div><div class="table-card"><div class="table-wrap"><table class="data-table" id="vTable"></table></div></div>
+      <div class="page-actions" style="margin-top:12px"><span class="muted small">Type what you physically counted. Variance = Counted − System. Blank = not counted.</span><label class="small">Expiry for added stock <input type="date" id="vExpiry" value="${new Date(Date.now()+6*864e5).toISOString().slice(0,10)}"></label><button class="btn primary" id="vPost" ${canPost()?'':'disabled'}>Post count adjustments</button></div>`;
+    let rows=[];const key=()=>`variance_${$('#vBranch').value}_${isoToday()}`;
+    let counts={};const saveCounts=()=>{try{localStorage.setItem(key(),JSON.stringify(counts));}catch(e){}};
+    const load=async()=>{
+      const {data,error}=await supabase.rpc('variance_report',{p_branch_id:Number($('#vBranch').value)});if(error)return toast(error.message,'error');
+      rows=data||[];try{counts=JSON.parse(localStorage.getItem(key())||'{}');}catch(e){counts={};}draw();
+    };
+    const calc=r=>{const c=counts[r.product_id];const has=c!==undefined&&c!=='';const v=has?Number(c)-Number(r.system_qty):null;return {has,v,val:has?v*Number(r.unit_cost||0):0};};
+    const vcell=v=>v===null?'<span class="muted">—</span>':v===0?'<span class="var-zero">0</span>':v>0?`<span class="var-pos">+${qty(v)}</span>`:`<span class="var-neg">−${qty(Math.abs(v))}</span>`;
+    const summary=()=>{
+      let over=0,short=0,overV=0,shortV=0,counted=0;
+      rows.forEach(r=>{const c=calc(r);if(c.has){counted++;if(c.v>0){over+=c.v;overV+=c.val;}else if(c.v<0){short+=-c.v;shortV+=-c.val;}}});
+      $('#vKpis').innerHTML=`<div class="kpi-grid kpi-grid-5">${kpi('Counted',`${counted} / ${rows.length}`,'Products with a count','blue')}${kpi('Over (+)',`+${qty(over)}`,'+ '+money(overV),'healthy')}${kpi('Short (−)',`−${qty(short)}`,'− '+money(shortV),'out')}${kpi('Net units',(over-short>0?'+':over-short<0?'−':'')+qty(Math.abs(over-short)),'Over minus short','neutral')}${kpi('Net value',(overV-shortV<0?'− ':overV-shortV>0?'+ ':'')+money(Math.abs(overV-shortV)),'At average cost','purple')}</div>`;
+      const diffs=rows.filter(r=>{const c=calc(r);return c.has&&c.v!==0;});
+      $('#vPost').textContent=`Post count adjustments (${diffs.length})`;$('#vPost').disabled=!canPost()||!diffs.length;
+    };
+    const draw=()=>{
+      const f=$('#vFilter').value,q=$('#vSearch').value.trim().toLowerCase();
+      summary();
+      const vis=rows.filter(r=>{const c=calc(r);if(f==='var'&&!(c.has&&c.v!==0))return false;if(f==='uncounted'&&c.has)return false;if(q&&!(`${r.product_name} ${r.product_code}`.toLowerCase().includes(q)))return false;return true;});
+      $('#vTable').innerHTML=`<thead><tr><th>SKU</th><th>Product</th><th class="r">Opening</th><th class="r">Received</th><th class="r">Transf. in</th><th class="r">Transf. out</th><th class="r">Waste</th><th class="r">Adjust.</th><th class="r">Expected</th><th class="r">System</th><th class="r">Counted</th><th class="r">Variance</th><th class="r">Value</th></tr></thead><tbody>${vis.map(r=>{const c=calc(r);return `<tr><td>${esc(r.product_code)}</td><td>${esc(r.product_name)}</td><td class="r">${qty(r.opening)}</td><td class="r">${qty(r.received)}</td><td class="r">${qty(r.transfer_in)}</td><td class="r">${qty(r.transfer_out)}</td><td class="r">${qty(r.waste)}</td><td class="r">${qty(r.adjustments)}</td><td class="r">${qty(r.expected)}</td><td class="r"><b>${qty(r.system_qty)}</b></td><td class="r"><input class="v-count" data-pid="${r.product_id}" type="number" min="0" step="any" value="${counts[r.product_id]??''}"></td><td class="r v-var">${vcell(c.v)}</td><td class="r v-val">${c.has&&c.v!==0?(c.val>0?'+':'−')+money(Math.abs(c.val)):'—'}</td></tr>`;}).join('')||'<tr><td colspan="13" class="empty">No products</td></tr>'}</tbody>`;
+      $$('.v-count').forEach(inp=>inp.oninput=()=>{const id=Number(inp.dataset.pid);if(inp.value==='')delete counts[id];else counts[id]=inp.value;saveCounts();
+        const r=rows.find(x=>x.product_id===id),c=calc(r),tr=inp.closest('tr');$('.v-var',tr).innerHTML=vcell(c.v);$('.v-val',tr).textContent=c.has&&c.v!==0?(c.val>0?'+':'−')+money(Math.abs(c.val)):'—';summary();});
+      const exp=rows.filter(r=>Number(r.expected)!==Number(r.system_qty));
+      $('#vExp').classList.toggle('hidden',!exp.length);if(exp.length)$('#vExp').textContent=`${exp.length} product(s) have a ledger total that differs from system stock — investigate: ${exp.slice(0,5).map(r=>r.product_name).join(', ')}`;
+    };
+    $('#vBranch').onchange=load;$('#vFilter').onchange=draw;$('#vSearch').oninput=draw;
+    $('#vExcel').onclick=()=>{const out=rows.map(r=>{const c=calc(r);return {...r,counted:c.has?Number(counts[r.product_id]):'',variance:c.has?c.v:'',value:c.has?c.val:''};});exportRowsExcel(out,[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'opening',label:'Opening'},{key:'received',label:'Received'},{key:'transfer_in',label:'Transfer In'},{key:'transfer_out',label:'Transfer Out'},{key:'waste',label:'Waste'},{key:'adjustments',label:'Adjustments'},{key:'expected',label:'Expected'},{key:'system_qty',label:'System'},{key:'counted',label:'Counted'},{key:'variance',label:'Variance (+/-)'},{key:'value',label:'Variance Value'}],`joffreys-variance-${isoToday()}`);};
+    $('#vPost').onclick=async()=>{
+      const diffs=rows.filter(r=>{const c=calc(r);return c.has&&c.v!==0;});const exp=$('#vExpiry').value;
+      if(diffs.some(r=>calc(r).v>0)&&!exp)return toast('Set an expiry date for added stock','error');
+      if(!confirm(`Post ${diffs.length} physical-count adjustment(s)? This changes stock.`))return;
+      $('#vPost').disabled=true;let ok=0;const errs=[];
+      for(const r of diffs){const {error}=await supabase.rpc('post_adjustment_v2',{p_adjustment_date:isoToday(),p_product_id:r.product_id,p_branch_id:Number($('#vBranch').value),p_mode:'PHYSICAL_COUNT',p_quantity:Number(counts[r.product_id]),p_reason:'Physical count',p_expiry_date:calc(r).v>0?exp:null,p_batch_no:null,p_notes:'Posted from Variance page',p_posting_key:crypto.randomUUID()});if(error)errs.push(`${r.product_name}: ${error.message}`);else{ok++;delete counts[r.product_id];}}
+      saveCounts();await requireData(true);await load();
+      toast(errs.length?`${ok} posted, ${errs.length} failed: ${errs[0]}`:`${ok} adjustment(s) posted`,errs.length?'error':undefined);
+    };
+    await load();
   },
 
   async replenishment(){

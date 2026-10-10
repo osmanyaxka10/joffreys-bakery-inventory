@@ -52,3 +52,6 @@ table tbody tr{transition:background .1s}table tbody tr:nth-child(even){backgrou
 @media(max-width:900px){.topbar h2{font-size:18px}.kpi-value{font-size:22px}}
 .sidebar-footer .btn,.sidebar-footer .btn.ghost{background:rgba(255,255,255,.06);color:#fff;border-color:rgba(255,255,255,.22);box-shadow:none}
 .sidebar-footer .btn:hover:not(:disabled){background:rgba(255,255,255,.14)}
+.var-pos{color:#15803d;font-weight:800}.var-neg{color:#c2410c;font-weight:800}.var-zero{color:var(--muted)}
+.v-count{width:90px;text-align:right}.table-wrap{overflow:auto}.data-table .r,table .r{text-align:right}
+.kpi-card.healthy{background:linear-gradient(135deg,#e9f9ef,#fff 60%)}.kpi-card.out{background:linear-gradient(135deg,#fff0e8,#fff 60%)}
