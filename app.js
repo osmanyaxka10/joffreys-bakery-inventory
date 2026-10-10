@@ -36,7 +36,6 @@ const navItems = [
   ['movements','≋','Movements'],
   ['receiving','↓','Receiving'],
   ['transfers','⇄','Transfers'],
-  ['transfer-invoices','▤','Transfer Invoices','./transfer-invoices.html'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
@@ -228,8 +227,41 @@ function exportRowsExcel(rows,columns,filename){
 }
 function downloadBlob(text,type,name){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function printRows(rows,columns,title){
-  const w=window.open('','_blank','noopener,noreferrer');if(!w)return toast('Allow pop-ups to print','error');
-  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial;padding:20px;color:#111}h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#eee}@media print{body{padding:0}}</style></head><body><h1>${esc(title)}</h1><p>Generated ${dateTimeFmt(new Date().toISOString())}</p><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close();
+  const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print','error');
+  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial;padding:20px;color:#111}h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#eee}@media print{body{padding:0}}</style></head><body><h1>${esc(title)}</h1><p>Generated ${dateTimeFmt(new Date().toISOString())}</p><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);w.document.close();setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400);
+}
+
+function printInvoices(kind,rows,dateStr){
+  const receiving=kind==='receiving';
+  const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print','error');
+  const groups=new Map();
+  rows.forEach(r=>{const k=r.reference_no||r.receiving_id||r.transfer_id||'-';if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);});
+  const pages=[...groups.entries()].map(([ref,lines])=>{
+    const f=lines[0];
+    const totalQty=lines.reduce((t,l)=>t+Number(l.quantity||0),0);
+    const totalVal=lines.reduce((t,l)=>t+Number(receiving?l.total_cost:l.total_value||0),0);
+    const meta=receiving
+      ?`<div><b>Supplier:</b> ${esc(f.supplier_name||'-')}</div><div><b>Supplier Invoice No:</b> ${esc(f.invoice_no||'-')}</div><div><b>Received at:</b> ${esc(locationName(f.branch_name)||f.branch_name||'-')}</div>`
+      :`<div><b>From:</b> ${esc(locationName(f.from_branch)||f.from_branch||'-')}</div><div><b>To:</b> ${esc(locationName(f.to_branch)||f.to_branch||'-')}</div>`;
+    const body=lines.map((l,i)=>`<tr><td class="c">${i+1}</td><td>${esc(l.product_code||'')}</td><td>${esc(l.product_name||'')}</td><td class="c">${esc(l.unit||'')}</td><td class="r">${qty(l.quantity)}</td>${receiving?`<td>${esc(l.batch_no||'')}</td><td class="c">${l.expiry_date?esc(dateFmt(l.expiry_date)):''}</td>`:''}<td class="r">${Number(l.unit_cost||0).toFixed(2)}</td><td class="r">${Number(receiving?l.total_cost:l.total_value||0).toFixed(2)}</td></tr>`).join('');
+    return `<section class="inv"><header><div><h1>JOFFREY’S BAKERY</h1><div class="sub">${receiving?'RECEIVING INVOICE':'TRANSFER INVOICE'}</div></div><div class="ref"><div><b>Ref:</b> ${esc(ref)}</div><div><b>Date:</b> ${esc(dateFmt(f.date))}</div></div></header>
+    <div class="meta">${meta}<div><b>Prepared by:</b> ${esc(f.performed_by||'-')}</div></div>
+    <table><thead><tr><th>#</th><th>SKU</th><th>Product</th><th>Unit</th><th>Qty</th>${receiving?'<th>Batch</th><th>Expiry</th>':''}<th>Unit Cost</th><th>Value (SAR)</th></tr></thead><tbody>${body}</tbody>
+    <tfoot><tr><td colspan="4" class="r"><b>Total</b></td><td class="r"><b>${qty(totalQty)}</b></td>${receiving?'<td></td><td></td>':''}<td></td><td class="r"><b>${totalVal.toFixed(2)}</b></td></tr></tfoot></table>
+    ${(f.receiving_notes||f.transfer_notes)?`<p class="notes"><b>Notes:</b> ${esc(f.receiving_notes||f.transfer_notes)}</p>`:''}
+    <div class="sign"><div>${receiving?'Received by':'Issued by'}: ______________________</div><div>${receiving?'Checked by':'Received by'}: ______________________</div><div>Signature / Date: ______________________</div></div></section>`;
+  }).join('');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receiving?'Receiving':'Transfer'} Invoices ${esc(dateFmt(dateStr))}</title><style>
+@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;font-size:12px}
+.inv{page-break-after:always;break-after:page;padding:0}.inv:last-child{page-break-after:auto;break-after:auto}
+header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:10px}
+h1{margin:0;font-size:22px;letter-spacing:1px}.sub{font-size:14px;font-weight:bold;margin-top:4px}.ref{text-align:right;line-height:1.6}
+.meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-bottom:10px;line-height:1.6}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:5px 6px;text-align:left;vertical-align:top}th{background:#eee}
+.r{text-align:right}.c{text-align:center}tfoot td{background:#f5f5f5}thead{display:table-header-group}tr{page-break-inside:avoid}
+.notes{margin-top:10px}.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:40px;font-size:11px}
+</style></head><body>${pages||'<p>No transactions on this date.</p>'}</body></html>`);
+  w.document.close();setTimeout(()=>{try{w.focus();w.print();}catch(e){}},500);
 }
 
 function renderDataTable(host,rows,columns,opt={}){
@@ -545,7 +577,7 @@ function openTransactionDateDetail(kind,group){
       ${kpi('Total Value',money(group.value),receiving?'Receiving cost':'Transferred stock value')}
     </div>
     <div class="page-actions">
-      <button class="btn primary" id="printDailyTransaction">Print / Save PDF</button>
+      <button class="btn primary" id="printDailyTransaction">Print Invoices (A4)</button>
       <button class="btn" id="exportDailyTransaction">Excel</button>
       <button class="btn" id="closeDailyTransaction">Close</button>
     </div>
@@ -555,7 +587,7 @@ function openTransactionDateDetail(kind,group){
     filters:receiving?[{key:'supplier_name',label:'Supplier'},{key:'reference_no',label:'Reference'}]:[{key:'to_branch',label:'Destination',type:'location'},{key:'reference_no',label:'Reference'}],
     filename:`joffreys-${kind}-${group.date}`,title:`Joffrey’s Bakery ${title}`,pageSize:100
   });
-  $('#printDailyTransaction').onclick=()=>printRows(rows,columns,`Joffrey’s Bakery ${title}`);
+  $('#printDailyTransaction').onclick=()=>printInvoices(kind,rows,group.date);
   $('#exportDailyTransaction').onclick=()=>exportRowsExcel(rows,columns,`joffreys-${kind}-${group.date}`);
   $('#closeDailyTransaction').onclick=closeModal;
 }
