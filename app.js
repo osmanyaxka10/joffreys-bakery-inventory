@@ -327,6 +327,63 @@ function dashboardAttentionHtml(lowRows,outRows,missingBatches,missingUnits){
   return `<div class="attention-panel"><div class="attention-head"><strong>Operations Attention</strong><span>${rows.length} items requiring review</span></div>${rows.length?`<div class="attention-list">${rows.map(r=>`<div class="attention-row"><i class="attention-dot" style="background:${r.color}"></i><div class="attention-title">${esc(r.title)}</div><div class="attention-meta">${esc(r.meta)}</div><button class="btn small-btn" data-attention-page="${r.page}">${esc(r.action)}</button></div>`).join('')}</div>`:'<div class="attention-empty">No attention items in current stock.</div>'}</div>`;
 }
 
+const AUDIT_BASELINE_DATE='2026-09-30';
+const AUDIT_OPENING_STOCK={
+  'english dates cake':45,'english lemon cake':55,'tiramisu':30,'carrot cake':10,'carrot cheesecake':10,'sacher cake':30,
+  'blueberry cheese cake':36,'lotus cheese cake':24,'croissant chocolate':26,'croissant plain':28,'croissant white cheese':90,'croissant cheese yellow':90,
+  'cookies chocolate':297,'cookies vanilla':545,'muffin chocolate':35,'muffin blueberry':13,'halloumi pesto baguette':31,'fajita wrap':163,
+  'turkey & cheese baguette':48,'fajita small':95,'turkey cheese small':25,'tuna small':25,'halloumi small':15,
+  'ranch club':30,'caesar club':30,'3 cheese club':30,'lotus pudding':2,'kunafa pudding':5,'cookies pudding':3,'chocolate pudding':1,
+  'ice cream chocolate':14,'date cheese cake':10
+};
+function auditBaseline(productName){
+  const key=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  if(Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,key))return AUDIT_OPENING_STOCK[key];
+  const aliases={'turkey and cheese baguette':'turkey & cheese baguette','three cheese club':'3 cheese club','blueberry cheesecake':'blueberry cheese cake','lotus cheesecake':'lotus cheese cake'};
+  const alias=aliases[key];return alias&&Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,alias)?AUDIT_OPENING_STOCK[alias]:null;
+}
+async function loadAuditDifferenceRows(toDate=isoToday()){
+  const from=AUDIT_BASELINE_DATE;
+  const [rr,tr,wr,ar]=await Promise.all([
+    supabase.from('v_daily_receiving_report').select('date,branch_id,product_id,product_code,product_name,quantity').eq('branch_id',1).gte('date',from).lte('date',toDate),
+    supabase.from('v_daily_transfer_report').select('date,from_branch_id,to_branch_id,product_id,product_code,product_name,quantity').or('from_branch_id.eq.1,to_branch_id.eq.1').gte('date',from).lte('date',toDate),
+    supabase.from('waste').select('waste_date,product_id,quantity').eq('branch_id',1).eq('status','COMPLETED').gte('waste_date',from).lte('waste_date',toDate),
+    supabase.from('adjustments').select('adjustment_date,product_id,quantity_change').eq('branch_id',1).gte('adjustment_date',from).lte('adjustment_date',toDate)
+  ]);
+  for(const r of [rr,tr,wr,ar])if(r.error)throw r.error;
+  const products=new Map();
+  const add=(id,name,code)=>{if(!products.has(Number(id)))products.set(Number(id),{product_id:Number(id),product_name:name||'Unknown product',product_code:code||'—',received:0,transferred:0,waste:0,adjustments:0});else{const p=products.get(Number(id));if(!p.product_code||p.product_code==='—')p.product_code=code||'—';}};
+  for(const p of state.positions.filter(x=>x.branch_name==='Warehouse'))add(p.product_id,p.product_name,p.product_code);
+  for(const r of rr.data||[]){add(r.product_id,r.product_name,r.product_code);products.get(Number(r.product_id)).received+=Number(r.quantity||0);}
+  for(const r of tr.data||[]){add(r.product_id,r.product_name,r.product_code);const p=products.get(Number(r.product_id));if(Number(r.from_branch_id)===1)p.transferred+=Number(r.quantity||0);if(Number(r.to_branch_id)===1)p.transferred-=Number(r.quantity||0);}
+  for(const r of wr.data||[]){if(products.has(Number(r.product_id)))products.get(Number(r.product_id)).waste+=Number(r.quantity||0);}
+  for(const r of ar.data||[]){if(products.has(Number(r.product_id)))products.get(Number(r.product_id)).adjustments+=Number(r.quantity_change||0);}
+  return [...products.values()].map(p=>{
+    const opening=auditBaseline(p.product_name);
+    const actual=Number(state.positions.find(x=>x.branch_name==='Warehouse'&&Number(x.product_id)===p.product_id)?.available_quantity||0);
+    const difference=p.received-p.transferred;
+    const expected=opening===null?null:opening+p.received-p.transferred-p.waste+p.adjustments;
+    return {...p,opening,audit_difference:difference,expected,actual,variance:expected===null?null:actual-expected};
+  }).sort((a,b)=>a.product_name.localeCompare(b.product_name));
+}
+function auditDifferencePanel(id,title='Quick Find — Audit Difference'){
+  return `<section class="panel audit-quick-panel"><div class="dash-section-head"><h3>${esc(title)}</h3><span>Bakery Warehouse · baseline 30/09/2026</span></div><div class="audit-quick-controls"><label>Quick find product<input id="${id}Search" type="search" placeholder="Type product name or SKU…"></label><button id="${id}Refresh" class="btn">Refresh audit</button></div><p class="muted small" id="${id}Note">Loading real receiving, transfer, waste, adjustment and current-stock records…</p><div id="${id}Table" class="table-wrap"><div class="panel loading">Loading audit data…</div></div></section>`;
+}
+async function wireAuditDifferencePanel(id){
+  const search=$('#'+id+'Search'),host=$('#'+id+'Table'),note=$('#'+id+'Note'),refresh=$('#'+id+'Refresh');
+  if(!search||!host||!note||!refresh)return;
+  let rows=[];
+  const draw=()=>{
+    const q=search.value.trim().toLowerCase();
+    const found=rows.filter(r=>!q||[r.product_name,r.product_code].some(v=>String(v||'').toLowerCase().includes(q)));
+    const cols=[['product_code','SKU'],['product_name','Product'],['opening','Opening'],['received','Received'],['transferred','Transferred'],['audit_difference','Received − transferred'],['expected','Expected stock'],['actual','Actual stock'],['variance','Variance']];
+    host.innerHTML=`<table class="data-table"><thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${found.length?found.map(r=>`<tr>${cols.map(([k])=>{const v=r[k];let s=v===null?'Baseline missing':qty(v);if(k==='product_name')s=esc(v);if(k==='product_code')s=esc(v);if(k==='variance'&&v!==null)s=(v>0?'+':'')+qty(v);return `<td class="${['opening','received','transferred','audit_difference','expected','actual','variance'].includes(k)?'num':''} ${k==='variance'&&v!==null&&Math.abs(v)>0.00001?'audit-variance':''}">${s}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${cols.length}" class="empty">No matching products.</td></tr>`}</tbody></table>`;
+    note.textContent=`${found.length} products · received minus transferred is shown separately from stock variance. “Baseline missing” means the 30/09 opening count is not recorded in the app's verified baseline list.`;
+  };
+  const load=async()=>{refresh.disabled=true;note.textContent='Refreshing live Supabase records…';try{rows=await loadAuditDifferenceRows();draw();}catch(e){host.innerHTML=`<div class="panel empty">Audit could not load: ${esc(e?.message||String(e))}</div>`;note.textContent='Check access to receiving, transfer, waste and adjustment records.';}finally{refresh.disabled=false;}};
+  search.oninput=draw;refresh.onclick=load;await load();
+}
+
 const pages = {
   async dashboard(){
     ensureDashboardProStyles();
@@ -387,7 +444,9 @@ const pages = {
       <div class="chart-grid">${barChart('Top 10 Products by Stock Value',topValue,COLORS.neutral,money)}${barChart('Top 10 Products by Quantity',topQty,COLORS.neutral,qty)}</div>
       <div class="dash-section-head"><h3>Receiving & Transfer Activity</h3><span>30/09/2026 — ${dateFmt(to)} · daily units</span></div>
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
+      ${auditDifferencePanel('dashAudit')}
     `;
+    await wireAuditDifferencePanel('dashAudit');
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
@@ -677,7 +736,7 @@ function openBatchExpiryCorrection(){
 }
 
 function renderReportsShell(){
-  const r=periodRange('this_month');content.innerHTML=`<div class="report-controls"><label>Report<select id="reportType"><option value="current_stock">Current Stock Report</option><option value="valuation">Stock Valuation Report</option><option value="daily_receiving">Daily Receiving Report</option><option value="daily_transfer">Daily Transfer Report</option><option value="daily_movement">Daily Movement Report</option><option value="daily_waste">Daily Waste Report</option><option value="monthly_receiving">Monthly Receiving Summary</option><option value="monthly_transfer">Monthly Transfer Summary</option><option value="monthly_movement">Monthly Movement Summary</option><option value="monthly_waste">Monthly Waste Summary</option><option value="warehouse_shops">Bakery Warehouse vs Jeddah Shops</option><option value="supplier_summary">Supplier Summary</option><option value="category_summary">Category Summary</option><option value="low_stock">Low Stock Report</option><option value="out_stock">Out of Stock Report</option><option value="expiry">Expiry Report</option><option value="product_history">Product Movement History</option><option value="branch_transfer">Branch Transfer Summary</option><option value="adjustment">Stock Adjustment Report</option></select></label><label id="reportProductWrap" class="hidden">Product<select id="reportProduct"><option value="">Select product</option>${productOptions()}</select></label><label>From<input id="reportFrom" type="date" min="${INVENTORY_START_DATE}" max="${isoToday()}" value="${r.from}"></label><label>To<input id="reportTo" type="date" min="${INVENTORY_START_DATE}" max="${isoToday()}" value="${r.to}"></label><button id="runReport" class="btn primary">Run Report</button></div><div id="reportResult" class="report-result"><div class="panel empty">Choose a report and click Run Report.</div></div>`;
+  const r=periodRange('this_month');content.innerHTML=`<div class="report-controls"><label>Report<select id="reportType"><option value="current_stock">Current Stock Report</option><option value="valuation">Stock Valuation Report</option><option value="daily_receiving">Daily Receiving Report</option><option value="daily_transfer">Daily Transfer Report</option><option value="daily_movement">Daily Movement Report</option><option value="daily_waste">Daily Waste Report</option><option value="monthly_receiving">Monthly Receiving Summary</option><option value="monthly_transfer">Monthly Transfer Summary</option><option value="monthly_movement">Monthly Movement Summary</option><option value="monthly_waste">Monthly Waste Summary</option><option value="warehouse_shops">Bakery Warehouse vs Jeddah Shops</option><option value="supplier_summary">Supplier Summary</option><option value="category_summary">Category Summary</option><option value="low_stock">Low Stock Report</option><option value="out_stock">Out of Stock Report</option><option value="expiry">Expiry Report</option><option value="product_history">Product Movement History</option><option value="branch_transfer">Branch Transfer Summary</option><option value="adjustment">Stock Adjustment Report</option><option value="audit_difference">Quick Find — Audit Difference</option></select></label><label id="reportProductWrap" class="hidden">Product<select id="reportProduct"><option value="">Select product</option>${productOptions()}</select></label><label>From<input id="reportFrom" type="date" min="${INVENTORY_START_DATE}" max="${isoToday()}" value="${r.from}"></label><label>To<input id="reportTo" type="date" min="${INVENTORY_START_DATE}" max="${isoToday()}" value="${r.to}"></label><button id="runReport" class="btn primary">Run Report</button></div><div id="reportResult" class="report-result"><div class="panel empty">Choose a report and click Run Report.</div></div>`;
   const sync=()=>$('#reportProductWrap').classList.toggle('hidden',$('#reportType').value!=='product_history');$('#reportType').onchange=sync;sync();$('#runReport').onclick=runReport;
 }
 function reportDateGroups(rows,dateKey){
@@ -686,7 +745,9 @@ function reportDateGroups(rows,dateKey){
   return [...map.entries()].sort((a,b)=>b[0].localeCompare(a[0])).map(([date,rows])=>({date,rows}));
 }
 async function runReport(){
-  const type=$('#reportType').value,from=$('#reportFrom').value,to=$('#reportTo').value;if(from&&to&&from>to)return toast('Invalid report date range','error');const host=$('#reportResult');host.innerHTML='<div class="panel loading">Running report…</div>';
+  const type=$('#reportType').value,from=$('#reportFrom').value,to=$('#reportTo').value;if(from&&to&&from>to)return toast('Invalid report date range','error');const host=$('#reportResult');
+  if(type==='audit_difference'){host.innerHTML=auditDifferencePanel('reportAudit','Quick Find — Audit Difference');await wireAuditDifferencePanel('reportAudit');return;}
+  host.innerHTML='<div class="panel loading">Running report…</div>';
   try{
     const result=await reportDefinition(type,from,to);
     let html=`<div class="report-head"><h3>${esc(result.title)}</h3><span>${from&&to?`${dateFmt(from)} — ${dateFmt(to)}`:'Current data'}</span></div>${result.summary||''}`;
