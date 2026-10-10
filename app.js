@@ -435,9 +435,60 @@ function renderScanReview(d,prods){
   };
 }
 
+function dashSwitch(cur){
+  return `<div class="seg"><button class="${cur==='overview'?'on':''}" data-dv="overview">Overview</button><button class="${cur==='retool'?'on':''}" data-dv="retool">Retool view</button></div>`;
+}
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.seg [data-dv]');if(!b)return;state.dashView=b.dataset.dv;try{localStorage.setItem('dashView',state.dashView);}catch(_){}go('dashboard');});
+try{state.dashView=localStorage.getItem('dashView')||'overview';}catch(_){state.dashView='overview';}
+
+async function dashboardRetool(){
+  const today=isoToday();const from0='2026-09-30';
+  state.rt=state.rt||{from:from0,to:today,loc:'all',tab:'stock'};const rt=state.rt;rt.to=today>rt.to?rt.to:rt.to;
+  const whId=(state.branches.find(b=>b.name==='Warehouse')||{}).id||1;
+  const [rcv,trf,varR,snapR]=await Promise.all([
+    supabase.from('v_daily_receiving_report').select('*').gte('date',rt.from).lte('date',rt.to).order('date',{ascending:false}).limit(5000),
+    supabase.from('v_daily_transfer_report').select('*').gte('date',rt.from).lte('date',rt.to).order('date',{ascending:false}).limit(5000),
+    supabase.rpc('variance_report',{p_branch_id:whId}),
+    supabase.from('daily_stock_snapshots').select('snapshot_date,value').order('snapshot_date',{ascending:false}).limit(20000)
+  ]);
+  const R=rcv.data||[],T=trf.data||[];
+  const pos=state.positions.filter(p=>rt.loc==='all'||String(p.branch_id)===rt.loc).map(r=>({...r,location_display:locationName(r.branch_name)}));
+  const exp=state.expiry.filter(x=>Number(x.remaining_quantity)>0&&(rt.loc==='all'||String(x.branch_id)===rt.loc)).map(r=>({...r,branch_display:locationName(r.branch_name)}));
+  const vrows=(varR.data||[]).map(r=>{const o=auditBaseline(r.product_name);const v=o===null?null:Number(r.system_qty)-(o+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments));return {...r,verified_opening:o,audit_variance:v};});
+  const expired=exp.filter(x=>x.expiry_date&&Number(x.days_until_expiry)<0);
+  const snapBy=new Map();(snapR.data||[]).forEach(r=>snapBy.set(r.snapshot_date,(snapBy.get(r.snapshot_date)||0)+Number(r.value||0)));
+  const spark=[...snapBy.entries()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-14).map(x=>x[1]);
+  const sparkSvg=(a)=>{if(a.length<2)return '';const mx=Math.max(...a),mn=Math.min(...a),w=90,h=26;const pts=a.map((v,i)=>`${(i/(a.length-1)*w).toFixed(1)},${(h-(mx===mn?h/2:(v-mn)/(mx-mn)*(h-4))-2).toFixed(1)}`).join(' ');return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline fill="none" stroke="currentColor" stroke-width="2" points="${pts}"/></svg>`;};
+  const stat=(l,v,sub,extra='')=>`<div class="rt-stat"><div class="rt-stat-l">${esc(l)}</div><div class="rt-stat-v">${v}</div><div class="rt-stat-s">${esc(sub)}</div>${extra}</div>`;
+  const audN=vrows.filter(r=>r.audit_variance!==null&&r.audit_variance!==0).length,audNet=vrows.reduce((a,r)=>a+(r.audit_variance||0),0);
+  content.innerHTML=`${dashSwitch('retool')}
+    <div class="rt-filters"><label>From<input type="date" id="rtFrom" value="${rt.from}"></label><label>To<input type="date" id="rtTo" value="${rt.to}" max="${today}"></label><label>Location<select id="rtLoc"><option value="all">All locations</option>${state.branches.filter(b=>b.is_active!==false).map(b=>`<option value="${b.id}" ${String(b.id)===rt.loc?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label><button class="btn" id="rtApply">Apply</button></div>
+    <div class="rt-stats">
+      ${stat('Inventory value',money(sum(pos,'stock_value')),`${qty(sum(pos,'available_quantity'))} units`,sparkSvg(spark))}
+      ${stat('Receipts in range',qty(distinctCount(R,'receiving_id')),`${qty(sum(R,'quantity'))} units · ${money(sum(R,'total_cost'))}`)}
+      ${stat('Transfers in range',qty(distinctCount(T,'transfer_id')),`${qty(sum(T,'quantity'))} units · ${money(sum(T,'total_value'))}`)}
+      ${stat('Expired units',`<span class="${expired.length?'var-neg':''}">${qty(sum(expired,'remaining_quantity'))}</span>`,`${expired.length} batches`)}
+      ${stat('Audit variance (WH)',`<span class="${audNet>0?'var-pos':audNet<0?'var-neg':''}">${audNet>0?'+':audNet<0?'−':''}${qty(Math.abs(audNet))}</span>`,`${audN} products differ`)}
+    </div>
+    <div class="rt-tabs">${[['stock','Stock',pos.length],['expiry','Expiry',exp.length],['receiving','Receiving',R.length],['transfers','Transfers',T.length],['variance','Variance (WH)',vrows.length]].map(([k,l,n])=>`<button data-tab="${k}" class="${rt.tab===k?'on':''}">${l} <span>${n}</span></button>`).join('')}</div>
+    <div id="rtBody"></div>`;
+  const body='#rtBody';
+  const tabs={
+    stock:()=>renderDataTable(body,pos,[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'category_name',label:'Category'},{key:'location_display',label:'Location'},{key:'available_quantity',label:'Qty',type:'qty',align:'right'},{key:'stock_status',label:'Status',type:'badge'},{key:'unit_cost',label:'Unit cost',type:'money',align:'right'},{key:'stock_value',label:'Value',type:'money',align:'right'},{key:'expiry_status',label:'Expiry',type:'badge'}],{filters:[{key:'category_name',label:'Category'},{key:'stock_status',label:'Status'}],filename:'rt-stock',title:'Stock',pageSize:25,sortKey:'product_name'}),
+    expiry:()=>renderDataTable(body,exp,[{key:'product_name',label:'Product'},{key:'batch_no',label:'Batch'},{key:'branch_display',label:'Location'},{key:'remaining_quantity',label:'Qty',type:'qty',align:'right'},{key:'expiry_date',label:'Expiry',type:'date'},{key:'days_until_expiry',label:'Days left',type:'qty',align:'right'},{key:'expiry_status',label:'Status',type:'badge'}],{filters:[{key:'expiry_status',label:'Status'}],filename:'rt-expiry',title:'Expiry',pageSize:25,sortKey:'expiry_date'}),
+    receiving:()=>renderDataTable(body,R,[{key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Reference'},{key:'supplier_name',label:'Supplier'},{key:'product_name',label:'Product'},{key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'unit_cost',label:'Unit cost',type:'money',align:'right'},{key:'total_cost',label:'Value',type:'money',align:'right'},{key:'expiry_date',label:'Expiry',type:'date'}],{filters:[{key:'supplier_name',label:'Supplier'},{key:'reference_no',label:'Reference'}],filename:'rt-receiving',title:'Receiving',pageSize:25}),
+    transfers:()=>renderDataTable(body,T,[{key:'date',label:'Date',type:'date'},{key:'reference_no',label:'Reference'},{key:'from_branch',label:'From',type:'location'},{key:'to_branch',label:'To',type:'location'},{key:'product_name',label:'Product'},{key:'quantity',label:'Qty',type:'qty',align:'right'},{key:'total_value',label:'Value',type:'money',align:'right'}],{filters:[{key:'to_branch',label:'To',type:'location'}],filename:'rt-transfers',title:'Transfers',pageSize:25}),
+    variance:()=>renderDataTable(body,vrows,[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'verified_opening',label:'Verified 30/09',type:'qty',align:'right'},{key:'opening',label:'Opening (system)',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transfer_out',label:'Transferred',type:'qty',align:'right'},{key:'system_qty',label:'System',type:'qty',align:'right'},{key:'audit_variance',label:'Audit variance',type:'qty',align:'right'}],{filename:'rt-variance',title:'Variance',pageSize:25,sortKey:'audit_variance',sortDir:'desc'})
+  };
+  tabs[rt.tab]();
+  $$('.rt-tabs [data-tab]').forEach(b=>b.onclick=()=>{rt.tab=b.dataset.tab;$$('.rt-tabs button').forEach(x=>x.classList.toggle('on',x===b));tabs[rt.tab]();});
+  $('#rtApply').onclick=()=>{rt.from=$('#rtFrom').value||from0;rt.to=$('#rtTo').value||today;rt.loc=$('#rtLoc').value;dashboardRetool();};
+}
+
 const pages = {
   async dashboard(){
     ensureDashboardProStyles();
+    if(state.dashView==='retool')return dashboardRetool();
     const from='2026-09-30';
     const to=isoToday();
     const dashboardResults=await Promise.allSettled([
@@ -508,6 +559,7 @@ const pages = {
     const deltaTxt=dVal===null?'':`<span class="delta ${dVal>=0?'up':'down'}">${dVal>=0?'▲':'▼'} ${money(Math.abs(dVal))} vs last night</span>`;
     const hr=new Date().getHours();const greet=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
     content.innerHTML=`
+      ${dashSwitch('overview')}
       <div class="dash-hero"><div><h2>${greet}, ${esc((state.appUser?.name||'').split(' ')[0]||'team')}</h2><p>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · Joffrey’s Bakery Jeddah</p></div>
         <div class="dash-hero-stats"><div><span>Inventory value</span><strong>${money(totalValue)}</strong>${deltaTxt}</div><div><span>Today in</span><strong>${qty(sum(tRecv,'quantity'))}</strong><small>${distinctCount(tRecv,'receiving_id')} receipts</small></div><div><span>Today out</span><strong>${qty(sum(tTr,'quantity'))}</strong><small>${distinctCount(tTr,'transfer_id')} transfers</small></div></div></div>
       <div class="dash-section-head"><h3>Action center</h3><span>${actions.length?actions.length+' item(s) need attention':'All clear'}</span></div>
