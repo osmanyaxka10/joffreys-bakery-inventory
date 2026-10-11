@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css?v=20261006-2" />
-  <link rel="stylesheet" href="./theme.css?v=20261010-4" />
+  <link rel="stylesheet" href="./theme.css?v=20261012-1" />
   <title>JOFFREY’S BAKERY JEDDAH — Inventory</title>
 </head>
 <body>
@@ -54,15 +54,25 @@
       <header class="topbar">
         <button id="menuBtn" class="icon-btn mobile-only" aria-label="Open menu">☰</button>
         <div>
+          <div id="crumb" class="crumb"></div>
           <h2 id="pageTitle">Dashboard</h2>
           <p id="pageSubtitle" class="muted">Live bakery operations</p>
         </div>
         <div class="topbar-actions">
+          <button id="searchBtn" class="btn ghost search-btn" type="button" aria-label="Quick search">🔍 <span>Search</span> <kbd>Ctrl K</kbd></button>
           <button id="refreshBtn" class="btn ghost">Refresh</button>
         </div>
       </header>
       <div id="content" class="content"></div>
     </main>
+  </div>
+
+  <div id="cmdk" class="cmdk hidden" role="dialog" aria-label="Quick search">
+    <div class="cmdk-card">
+      <input id="cmdkInput" placeholder="Search pages, actions or products…" autocomplete="off" />
+      <div id="cmdkList" class="cmdk-list"></div>
+      <div class="cmdk-foot"><span>↑↓ navigate</span><span>Enter open</span><span>Esc close</span></div>
+    </div>
   </div>
 
   <dialog id="modal" class="modal">
@@ -98,6 +108,6 @@
       });
     }
   </script>
-  <script type="module" src="./app.js?v=20261010-5"></script>
+  <script type="module" src="./app.js?v=20261012-1"></script>
 </body>
 </html>
