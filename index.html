@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css?v=20261006-2" />
-  <link rel="stylesheet" href="./theme.css?v=20261012-11" />
+  <link rel="stylesheet" href="./theme.css?v=20261012-12" />
   <title>JOFFREY’S BAKERY JEDDAH — Inventory</title>
 </head>
 <body>
@@ -49,6 +49,7 @@
         <button id="logoutBtn" class="btn ghost wide">Sign out</button>
       </div>
     </aside>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>
 
     <main class="main">
       <header class="topbar">
@@ -60,9 +61,13 @@
         </div>
         <div class="topbar-actions">
           <button id="searchBtn" class="btn ghost search-btn" type="button" aria-label="Quick search">🔍 <span>Search</span> <kbd>Ctrl K</kbd></button>
-          <button id="refreshBtn" class="btn ghost">Refresh</button>
+          <button id="newReceivingBtn" class="btn quick-header-btn" type="button">＋ Receiving</button>
+          <button id="newTransferBtn" class="btn quick-header-btn" type="button">⇄ Transfer</button>
+          <button id="printDailyReportBtn" class="btn quick-header-btn" type="button">▤ Print / PDF</button>
+          <button id="refreshBtn" class="btn ghost">↻ Refresh</button>
         </div>
       </header>
+      <div class="print-report-heading">JOFFREY’S BAKERY JEDDAH · Daily Operations Report</div>
       <div id="content" class="content"></div>
     </main>
   </div>
@@ -93,7 +98,7 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', async () => {
         try {
-          const registration = await navigator.serviceWorker.register('./sw.js?v=20261009-4', { updateViaCache: 'none' });
+          const registration = await navigator.serviceWorker.register('./sw.js?v=20261012-12', { updateViaCache: 'none' });
           await registration.update();
         } catch (error) {
           console.warn('PWA update check failed', error);
@@ -108,6 +113,6 @@
       });
     }
   </script>
-  <script type="module" src="./app.js?v=20261012-11"></script>
+  <script type="module" src="./app.js?v=20261012-12"></script>
 </body>
 </html>
