@@ -364,12 +364,12 @@ function dashboardAttentionHtml(lowRows,outRows,missingBatches,missingUnits){
 
 const AUDIT_BASELINE_DATE='2026-09-30';
 const AUDIT_OPENING_STOCK={
-  'english dates cake':45,'english lemon cake':55,'tiramisu':30,'carrot cake':10,'carrot cheesecake':10,'sacher cake':30,
+  'english dates cake':45,'english lemon cake':55,'tiramisu':30,'carrot cake':10,'carrot cheesecake':10,'sacher cake':40,
   'blueberry cheese cake':36,'lotus cheese cake':24,'croissant chocolate':26,'croissant plain':28,'croissant white cheese':90,'croissant cheese yellow':90,
-  'cookies chocolate':297,'cookies vanilla':545,'muffin chocolate':35,'muffin blueberry':13,'halloumi pesto baguette':31,'fajita wrap':163,
+  'cookies chocolate':297,'cookies vanilla':545,'muffin chocolate':38,'muffin blueberry':13,'halloumi pesto baguette':31,'fajita wrap':163,
   'turkey cheese baguette':48,'fajita small':95,'turkey cheese small':25,'tuna small':25,'halloumi small':15,
-  'ranch club':30,'caesar club':30,'3 cheese club':30,'lotus pudding':2,'kunafa pudding':5,'cookies pudding':3,'chocolate pudding':1,
-  'ice cream chocolate':14
+  'ranch club':30,'caesar club':30,'3 cheese club':30,'lotus pudding':5,'kunafa pudding':5,'cookies pudding':5,'chocolate pudding':5,
+  'ice cream chocolate':15
 };
 function auditBaseline(productName){
   const key=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
