@@ -548,6 +548,23 @@ function docLineColumns(kind){
   base.push({key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:kind==='receiving'?'total_cost':'total_value',label:'Value',type:'money',align:'right'});
   return base;
 }
+function groupByDay(docs){
+  const m=new Map();
+  for(const d of docs){const k=String(d.date).slice(0,10);if(!m.has(k))m.set(k,{date:k,docs:[],documents:0,line_count:0,qty:0,value:0,parties:new Set()});
+    const g=m.get(k);g.docs.push(d);g.documents++;g.line_count+=d.line_count;g.qty+=d.qty;g.value+=d.value;g.parties.add(locationName(d.from===undefined?'':d.from));}
+  return [...m.values()].map(g=>({...g,key:g.date,parties:[...g.parties].filter(Boolean).join(', ')||'—'})).sort((a,b)=>b.date.localeCompare(a.date));
+}
+function dayColumns(kind){
+  const isR=kind==='receiving';
+  return [
+    {key:'date',type:'date',label:isR?'Received Date':'Delivery Date',render:(v)=>`<a class="doc-link">${esc(dateFmt(v))}</a>`},
+    {key:'documents',label:'Documents',type:'qty',align:'right'},
+    {key:'line_count',label:'Lines',type:'qty',align:'right'},
+    {key:'qty',label:'Total Qty',type:'qty',align:'right'},
+    {key:'value',label:'Value',type:'money',align:'right'},
+    {key:'parties',label:isR?'Supplier(s)':'From'}
+  ];
+}
 function docsPage(kind){
   const st=docState[kind],isR=kind==='receiving',title=isR?'Receiving':'Transfers';
   const range=()=>st.preset==='custom'?{from:st.from,to:st.to}:periodRange(st.preset);
@@ -555,17 +572,10 @@ function docsPage(kind){
   const opts=(arr,sel,all,loc=true)=>`<option value="">${all}</option>${arr.map(n=>`<option value="${esc(n)}" ${n===sel?'selected':''}>${esc(loc?locationName(n):n)}</option>`).join('')}`;
   const r0=range();
   content.innerHTML=`<div class="page-actions"><button class="btn primary" id="docNew" ${canPost()?'':'disabled'}>${isR?'＋ New Receiving':'⇄ New Transfer'}</button></div>
-  <div class="doc-tabs"><button class="${st.tab==='docs'?'on':''}" data-dt="docs">${title} Documents</button><button class="${st.tab==='date'?'on':''}" data-dt="date">By Date</button></div>
   <div id="docBody"></div>`;
   $('#docNew').onclick=isR?openReceiving:openTransfer;
-  $$('.doc-tabs [data-dt]').forEach(b=>b.onclick=()=>{st.tab=b.dataset.dt;docsPage(kind);});
   const body=$('#docBody');
-  if(st.tab==='date'){
-    body.innerHTML=`<div class="info-banner">Grouped by date. Click a date to see every document of that day; each date can be printed (A4, one document per page).</div><div id="docDateList"></div>`;
-    (async()=>{try{const {data,error}=await supabase.from(docView(kind)).select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;renderTransactionDateList('#docDateList',groupTransactionDates(data||[],isR?'receiving':'transfer'),isR?'receiving':'transfer');}catch(e){fail(e,'Load failed');}})();
-    return;
-  }
-  body.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${title}</span><button class="doc-bar-btn" id="docHide">Hide Filter</button><button class="doc-bar-btn" id="docRefresh">Refresh</button><button class="doc-bar-btn" id="docXls">Export to Excel</button><button class="doc-bar-btn" id="docPrintList">Print List</button></div>
+  body.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${title} by Date</span><button class="doc-bar-btn" id="docHide">Hide Filter</button><button class="doc-bar-btn" id="docRefresh">Refresh</button><button class="doc-bar-btn" id="docXls">Export to Excel</button><button class="doc-bar-btn" id="docPrintList">Print List</button></div>
   <div class="doc-filter" id="docFilter">
     <label>Time Period<select id="dfPreset">${DOC_PRESETS.map(([v,l])=>`<option value="${v}" ${v===st.preset?'selected':''}>${l}</option>`).join('')}</select></label>
     <label>From<input type="date" id="dfFrom" value="${esc(r0.from)}"></label><label>To<input type="date" id="dfTo" value="${esc(r0.to)}"></label>
@@ -575,11 +585,23 @@ function docsPage(kind){
     <button class="btn primary" id="dfApply">Apply</button>
   </div>
   <div id="docList"></div>`;
-  let all=[],shown=[];
+  let all=[],days=[];
+  const filtered=()=>{const q=st.doc.trim().toLowerCase();return all.filter(d=>(!st.a||d.from===st.a)&&(!st.b||d.to===st.b)&&(!q||`${d.ref} ${d.invoice_no}`.toLowerCase().includes(q)));};
+  const dayView=(g)=>{
+    const docs=g.docs;const back=()=>dayView(g);
+    content.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${title} — ${esc(dateFmt(g.date))}</span><button class="doc-bar-btn" id="dvBack">◂ All Dates</button><button class="doc-bar-btn" id="dvPrint">Print Day (A4)</button><button class="doc-bar-btn" id="dvXls">Export to Excel</button></div>
+    <div class="doc-head panel"><div><span>Date</span><strong>${esc(dateFmt(g.date))}</strong></div><div><span>Documents</span><strong>${qty(g.documents)}</strong></div><div><span>Lines</span><strong>${qty(g.line_count)}</strong></div><div><span>Total Qty</span><strong>${qty(g.qty)}</strong></div><div><span>Value</span><strong>${money(g.value)}</strong></div></div>
+    <div id="dvList"></div>`;
+    $('#dvBack').onclick=()=>docsPage(kind);
+    const lines=docs.flatMap(d=>d.lines);
+    $('#dvPrint').onclick=()=>printInvoices(kind,lines,g.date);
+    $('#dvXls').onclick=()=>exportRowsExcel(docs,docColumns(kind).map(c=>({...c,render:undefined})),`joffreys-${kind}-${g.date}`);
+    renderDataTable('#dvList',docs,docColumns(kind),{rowKey:'key',onRow:d=>showDoc(kind,d,back),filename:`joffreys-${kind}-${g.date}`,title:`Joffrey’s Bakery ${title} ${dateFmt(g.date)}`,pageSize:100,sortKey:'created_at',sortDir:'asc'});
+    window.scrollTo?.(0,0);
+  };
   const draw=()=>{
-    const q=st.doc.trim().toLowerCase();
-    shown=all.filter(d=>(!st.a||d.from===st.a)&&(!st.b||d.to===st.b)&&(!q||`${d.ref} ${d.invoice_no}`.toLowerCase().includes(q)));
-    renderDataTable('#docList',shown,docColumns(kind),{rowKey:'key',onRow:d=>showDoc(kind,d,()=>docsPage(kind)),filename:`joffreys-${kind}-documents`,title:`Joffrey’s Bakery ${title} Documents`,pageSize:100,sortKey:'date',sortDir:'desc'});
+    days=groupByDay(filtered());
+    renderDataTable('#docList',days,dayColumns(kind),{rowKey:'key',onRow:g=>dayView(g),filename:`joffreys-${kind}-by-date`,title:`Joffrey’s Bakery ${title} by Date`,pageSize:100,sortKey:'date',sortDir:'desc'});
   };
   const reload=async()=>{try{all=groupDocs(await loadDocRows(kind),kind);draw();}catch(e){fail(e,'Load failed');}};
   const readFilters=()=>{st.preset=$('#dfPreset').value;st.from=$('#dfFrom').value;st.to=$('#dfTo').value;st.a=$('#dfA').value;st.b=$('#dfB').value;st.doc=$('#dfDoc').value;};
@@ -588,8 +610,8 @@ function docsPage(kind){
   $('#dfApply').onclick=async()=>{readFilters();await reload();};
   $('#docRefresh').onclick=async()=>{readFilters();await reload();};
   $('#docHide').onclick=()=>{const f=$('#docFilter');f.classList.toggle('hidden');$('#docHide').textContent=f.classList.contains('hidden')?'Show Filter':'Hide Filter';};
-  $('#docXls').onclick=()=>exportRowsExcel(shown,docColumns(kind).map(c=>({...c,render:undefined})),`joffreys-${kind}-documents-${isoToday()}`);
-  $('#docPrintList').onclick=()=>printRows(shown,docColumns(kind).map(c=>({...c,render:undefined})),`Joffrey’s Bakery ${title} Documents`);
+  $('#docXls').onclick=()=>exportRowsExcel(days,dayColumns(kind).map(c=>({...c,render:undefined,key:c.key})),`joffreys-${kind}-by-date-${isoToday()}`);
+  $('#docPrintList').onclick=()=>printRows(days,dayColumns(kind).map(c=>({...c,render:undefined})),`Joffrey’s Bakery ${title} by Date`);
   reload();
 }
 function showDoc(kind,d,back){
