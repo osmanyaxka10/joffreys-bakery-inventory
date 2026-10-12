@@ -42,6 +42,7 @@ const navItems = [
   ['stock','▤','Stock'],
   ['movements','≋','Movements'],
   ['variance','±','Variance'],
+  ['compare','⇋','Compare Sheet'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
@@ -65,6 +66,7 @@ const pageMeta = {
   reports:['Reports','Daily, monthly and management reporting'],
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
+  compare:['Compare Sheet','Closing stock, received, transferred and available — per item'],
   variance:['Variance','Counted stock against the system: over (+) and short (−) by product'],
   scan:['Scan Invoice','Read a supplier invoice photo and draft the receiving automatically'],
   replenishment:['Replenishment','Automatic transfer and supplier-order suggestions from real usage'],
@@ -400,6 +402,36 @@ async function loadAuditDifferenceRows(toDate=isoToday()){
     const expected=opening===null?null:opening+p.received-p.transferred-p.waste+p.adjustments;
     return {...p,opening,audit_difference:difference,expected,actual,variance:expected===null?null:actual-expected};
   }).sort((a,b)=>a.product_name.localeCompare(b.product_name));
+}
+
+async function loadCompareRows(from,to){
+  const base=AUDIT_BASELINE_DATE;
+  const [rr,tr,wr,ar]=await Promise.all([
+    supabase.from('v_daily_receiving_report').select('date,product_id,product_code,product_name,quantity').eq('branch_id',1).gte('date',base).lte('date',to).limit(20000),
+    supabase.from('v_daily_transfer_report').select('date,from_branch_id,to_branch_id,product_id,product_code,product_name,quantity').or('from_branch_id.eq.1,to_branch_id.eq.1').gte('date',base).lte('date',to).limit(20000),
+    supabase.from('waste').select('waste_date,product_id,quantity').eq('branch_id',1).eq('status','COMPLETED').gte('waste_date',base).lte('waste_date',to).limit(20000),
+    supabase.from('adjustments').select('adjustment_date,product_id,quantity_change').eq('branch_id',1).gte('adjustment_date',base).lte('adjustment_date',to).limit(20000)
+  ]);
+  for(const r of [rr,tr,wr,ar])if(r.error)throw r.error;
+  const m=new Map();
+  const get=(id,name,code)=>{id=Number(id);if(!m.has(id))m.set(id,{product_id:id,product_name:name||'Unknown',product_code:code||'—',pre:0,received:0,transferred:0,waste:0,adjustments:0});const p=m.get(id);if(name&&p.product_name==='Unknown')p.product_name=name;if(code&&p.product_code==='—')p.product_code=code;return p;};
+  const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
+  for(const p of wh)get(p.product_id,p.product_name,p.product_code);
+  // add(p,field,d,v): before From it moves the opening, otherwise it is a period movement
+  const add=(p,f,d,v)=>{if(String(d).slice(0,10)<from)p.pre+=(f==='received'||f==='adjustments'?v:-v);else p[f]+=v;};
+  for(const r of rr.data||[])add(get(r.product_id,r.product_name,r.product_code),'received',r.date,Number(r.quantity||0));
+  for(const r of tr.data||[]){const p=get(r.product_id,r.product_name,r.product_code),q=Number(r.quantity||0);
+    if(Number(r.from_branch_id)===1)add(p,'transferred',r.date,q);
+    if(Number(r.to_branch_id)===1)add(p,'transferred',r.date,-q);}
+  for(const r of wr.data||[])if(m.has(Number(r.product_id)))add(m.get(Number(r.product_id)),'waste',r.waste_date,Number(r.quantity||0));
+  for(const r of ar.data||[])if(m.has(Number(r.product_id)))add(m.get(Number(r.product_id)),'adjustments',r.adjustment_date,Number(r.quantity_change||0));
+  return [...m.values()].map(p=>{
+    const b=auditBaseline(p.product_name);
+    const closing=(b===null?0:b)+p.pre;
+    const available=closing+p.received-p.transferred-p.waste+p.adjustments;
+    const system=Number(wh.find(x=>Number(x.product_id)===p.product_id)?.available_quantity||0);
+    return {...p,closing,available,system,diff:system-available,nobase:b===null};
+  }).filter(r=>r.closing||r.received||r.transferred||r.waste||r.adjustments||r.system).sort((a,b)=>a.product_name.localeCompare(b.product_name));
 }
 function auditDifferencePanel(id,title='Quick Find — Audit Difference',toDate=isoToday()){
   return `<section class="panel audit-quick-panel"><div class="dash-section-head"><h3>${esc(title)}</h3><span>Bakery Warehouse · 30/09/2026 — ${esc(dateFmt(toDate))}</span></div><div class="audit-quick-controls"><label>Quick find product<input id="${id}Search" type="search" placeholder="Type product name or SKU…"></label><button id="${id}Refresh" class="btn">Refresh audit</button></div><p class="muted small" id="${id}Note">Loading real receiving, transfer, waste, adjustment and current-stock records…</p><div id="${id}Table" class="table-wrap"><div class="panel loading">Loading audit data…</div></div></section>`;
@@ -799,6 +831,21 @@ const pages = {
     ],{filters:[{key:'branch_name',label:'Location',type:'location'},{key:'changed_by_name',label:'Changed By'}],filename:'joffreys-expiry-corrections',title:'Joffrey’s Bakery Expiry Correction Audit',pageSize:25});
   },
 
+  async compare(){
+    const to0=isoToday();let from='2026-10-01',to=to0;
+    content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><button class="btn primary" id="cmpGo">Apply</button></div>
+    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0).</div><div id="cmpTable"></div>`;
+    let rows=[];
+    const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No verified 30/09 count — closing taken as 0">*</span>':'')},
+      {key:'closing',label:'Closing Stock',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},
+      {key:'waste',label:'Waste',type:'qty',align:'right'},{key:'adjustments',label:'Adjust.',type:'qty',align:'right'},{key:'available',label:'Available Stock',type:'qty',align:'right'},
+      {key:'system',label:'System Stock',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right',render:v=>Math.abs(v)>0.00001?`<b class="audit-variance">${v>0?'+':''}${qty(v)}</b>`:'0'}];
+    const draw=()=>{const q=$('#cmpQ').value.trim().toLowerCase();const f=rows.filter(r=>!q||`${r.product_name} ${r.product_code}`.toLowerCase().includes(q));
+      renderDataTable('#cmpTable',f,cols,{filename:'joffreys-compare-sheet',title:`Joffrey’s Bakery Compare Sheet ${dateFmt(from)} – ${dateFmt(to)}`,pageSize:200,sortKey:'product_name',sortDir:'asc'});};
+    const load=async()=>{from=$('#cmpFrom').value||from;to=$('#cmpTo').value||to;if(from<AUDIT_BASELINE_DATE)from=AUDIT_BASELINE_DATE;if(from>to)return toast('From date is after To date','error');
+      try{rows=await loadCompareRows(from,to);draw();}catch(e){fail(e,'Load failed');}};
+    $('#cmpGo').onclick=load;$('#cmpQ').oninput=draw;await load();
+  },
   async variance(){
     const physical=state.branches.filter(b=>b.is_active!==false);
     const wh=physical.find(b=>b.name==='Warehouse')||physical[0];
