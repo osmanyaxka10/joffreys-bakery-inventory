@@ -219,7 +219,7 @@ function donutChart(title,items){
 }
 function barChart(title,items,color=COLORS.neutral,formatter=qty){
   const max=Math.max(0,...items.map(x=>Number(x.value||0)));
-  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const v=Number(x.value||0);const pct=max&&v>0?v/max*100:0;const zero=v<=0?' zero':'';return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill${zero}" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const v=Number(x.value||0);const pct=max&&v>0?v/max*100:0;const zero=v<=0?' zero':'';return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}${x.warn?' <b class="var-badge" title="Closing count differs from system stock">±</b>':''}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill${zero}" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
 }
 function trendChart(title,items,color=COLORS.receiving,formatter=qty){
   const max=Math.max(0,...items.map(x=>Number(x.value||0)));
@@ -478,6 +478,43 @@ async function showProductHistory(r){
     modalBody.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Calculated stock',qty(bal),'Closing + received − transferred − waste ± adjustments')}${kpi('System stock',qty(sys),'Current system stock')}${kpi('Difference',(sys-bal>0?'+':'')+qty(sys-bal),Math.abs(sys-bal)<0.00001?'Matches':'Needs review')}</div><div id="phTable"></div>`;
     renderDataTable('#phTable',rows,[{key:'n',label:'#',align:'right',noTotal:true},{key:'date',label:'Date',type:'date'},{key:'type',label:'Type'},{key:'ref',label:'Reference'},{key:'in_qty',label:'In',type:'qty',align:'right'},{key:'out_qty',label:'Out',type:'qty',align:'right'},{key:'balance',label:'Balance',type:'qty',align:'right',noTotal:true}],{filename:`joffreys-history-${r.product_code||id}`,title:`${r.product_name} history`,pageSize:200,sortKey:'n',sortDir:'asc'});
   }catch(e){modalBody.innerHTML=`<div class="panel empty">History could not load: ${esc(e?.message||String(e))}</div>`;}
+}
+
+function openExpiryQuick(kind){
+  const live=(state.expiry||[]).filter(x=>Number(x.remaining_quantity)>0&&x.expiry_date);
+  const rows=live.filter(x=>kind==='expired'?Number(x.days_until_expiry)<0:Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=3).map(x=>({...x}));
+  const units=rows.reduce((a,x)=>a+Number(x.remaining_quantity||0),0);
+  openModal(kind==='expired'?'Expired batches':'Expiring within 3 days',`${qty(units)} units in ${rows.length} batches — record waste for what cannot be sold`,`<div class="page-actions"><button class="btn primary" id="eqWaste" ${canPost()?'':'disabled'}>♲ Record Waste</button><button class="btn" id="eqPage">Open full Expiry page</button></div><div id="eqTable"></div>`,'wide');
+  $('#eqWaste').onclick=()=>{closeModal();openWaste();};$('#eqPage').onclick=()=>{closeModal();go('expiry');};
+  renderDataTable('#eqTable',rows,[{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'batch_no',label:'Batch'},{key:'remaining_quantity',label:'Qty',type:'qty',align:'right'},{key:'expiry_date',label:'Expiry',type:'date'},{key:'days_until_expiry',label:'Days',type:'qty',align:'right',noTotal:true}],{filename:`joffreys-expiry-${kind}`,title:kind==='expired'?'Expired batches':'Expiring within 3 days',pageSize:50,sortKey:'expiry_date'});
+}
+async function printDailyReport(){
+  const day=isoToday();
+  try{
+    const [rr,tr]=await Promise.all([
+      supabase.from('v_daily_receiving_report').select('*').eq('date',day).limit(5000),
+      supabase.from('v_daily_transfer_report').select('*').eq('date',day).limit(5000)
+    ]);
+    if(rr.error)throw rr.error;if(tr.error)throw tr.error;
+    const R=groupDocs(rr.data||[],'receiving'),T=groupDocs(tr.data||[],'transfer');
+    const wh=state.positions.filter(x=>x.branch_name==='Warehouse'),sh=state.positions.filter(x=>x.branch_name!=='Warehouse');
+    const sumq=(a,k)=>a.reduce((t,x)=>t+Number(x[k]||0),0);
+    const live=(state.expiry||[]).filter(x=>Number(x.remaining_quantity)>0&&x.expiry_date);
+    const expired=live.filter(x=>Number(x.days_until_expiry)<0),soon=live.filter(x=>Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=3);
+    const low=wh.filter(x=>x.stock_status==='Low Stock'),out=wh.filter(x=>x.stock_status==='Out of Stock');
+    const tbl=(head,body)=>`<table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body||`<tr><td colspan="${head.length}" style="color:#666">None</td></tr>`}</tbody></table>`;
+    const docRows=(a,k)=>a.map(d=>`<tr><td>${esc(d.ref)}</td><td>${esc(locationName(d.from))} → ${esc(locationName(d.to))}</td><td class="n">${d.line_count}</td><td class="n">${qty(d.qty)}</td><td class="n">${money(d.value)}</td></tr>`).join('');
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>Daily Report ${esc(dateFmt(day))}</title><style>@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;color:#111;font-size:11px}h1{font-size:20px;margin:0}h2{font-size:13px;margin:16px 0 6px;border-bottom:2px solid #111;padding-bottom:3px}.k{display:flex;gap:10px;margin:12px 0}.k div{flex:1;border:1px solid #bbb;border-radius:6px;padding:8px}.k span{display:block;color:#555;font-size:10px}.k strong{font-size:16px}table{border-collapse:collapse;width:100%;margin-bottom:6px}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left}th{background:#eee}td.n{text-align:right}</style></head><body>
+<h1>Joffrey’s Bakery Jeddah — Daily Report</h1><div>${esc(dateFmt(day))} · printed ${esc(dateTimeFmt(new Date().toISOString()))}</div>
+<div class="k"><div><span>Warehouse stock</span><strong>${qty(sumq(wh,'available_quantity'))}</strong></div><div><span>Shops stock</span><strong>${qty(sumq(sh,'available_quantity'))}</strong></div><div><span>Inventory value</span><strong>${money(sumq(state.positions,'stock_value'))}</strong></div><div><span>Received today</span><strong>${qty(sumq(R,'qty'))}</strong></div><div><span>Transferred today</span><strong>${qty(sumq(T,'qty'))}</strong></div></div>
+<h2>Receiving today (${R.length})</h2>${tbl(['Document','Supplier → Location','Lines','Qty','Value'],docRows(R))}
+<h2>Transfers today (${T.length})</h2>${tbl(['Document','From → To','Lines','Qty','Value'],docRows(T))}
+<h2>Expiry</h2>${tbl(['Item','Units'],`<tr><td>Expired</td><td class="n">${qty(sumq(expired,'remaining_quantity'))}</td></tr><tr><td>Expiring within 3 days</td><td class="n">${qty(sumq(soon,'remaining_quantity'))}</td></tr>`)}
+<h2>Warehouse stock alerts</h2>${tbl(['Product','Status','Available'],[...out,...low].map(x=>`<tr><td>${esc(x.product_name)}</td><td>${esc(x.stock_status)}</td><td class="n">${qty(x.available_quantity)}</td></tr>`).join(''))}
+</body></html>`;
+    const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print','error');
+    w.document.write(html);w.document.close();setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400);
+  }catch(e){fail(e,'Report failed');}
 }
 function auditDifferencePanel(id,title='Quick Find — Audit Difference',toDate=isoToday()){
   return `<section class="panel audit-quick-panel"><div class="dash-section-head"><h3>${esc(title)}</h3><span>Bakery Warehouse · 30/09/2026 — ${esc(dateFmt(toDate))}</span></div><div class="audit-quick-controls"><label>Quick find product<input id="${id}Search" type="search" placeholder="Type product name or SKU…"></label><button id="${id}Refresh" class="btn">Refresh audit</button></div><p class="muted small" id="${id}Note">Loading real receiving, transfer, waste, adjustment and current-stock records…</p><div id="${id}Table" class="table-wrap"><div class="panel loading">Loading audit data…</div></div></section>`;
@@ -749,8 +786,8 @@ const pages = {
       {label:'Out of Stock',value:outWh.length,color:COLORS.out}
     ];
     const productTotals=aggregateProductPositions(state.positions);
-    const topValue=[...productTotals].filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,10).map(x=>({label:x.product_name,value:x.value}));
-    const topQty=[...productTotals].filter(x=>x.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,10).map(x=>({label:x.product_name,value:x.quantity}));
+    const topValue=[...productTotals].filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,10).map(x=>({label:x.product_name,value:x.value,product_id:x.product_id}));
+    const topQty=[...productTotals].filter(x=>x.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,10).map(x=>({label:x.product_name,value:x.quantity,product_id:x.product_id}));
 
     const dailyMap=new Map();
     for(const r of receiving){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).inValue+=Number(r.quantity||0);}
@@ -766,6 +803,8 @@ const pages = {
     const trSug=rep.filter(r=>Number(r.suggested_transfer)>0),orderSug=[...new Set(rep.filter(r=>Number(r.suggested_order)>0).map(r=>r.product_id))];
     const varRows=(varR.status==='fulfilled'&&!varR.value.error?varR.value.data:[])||[];
     const audVars=varRows.map(r=>{const o=auditBaseline(r.product_name);return o===null?0:Number(r.system_qty)-(o+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments));}).filter(v=>v!==0);
+    const varIds=new Set(varRows.filter(r=>{const o=auditBaseline(r.product_name);return o!==null&&Number(r.system_qty)-(o+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments))!==0;}).map(r=>Number(r.product_id)));
+    for(const x of [...topValue,...topQty])x.warn=varIds.has(Number(x.product_id));
     const audNet=audVars.reduce((a,b)=>a+b,0);
     const snapBy=new Map();((snapR.status==='fulfilled'&&!snapR.value.error?snapR.value.data:[])||[]).forEach(r=>{const o=snapBy.get(r.snapshot_date)||{date:r.snapshot_date,units:0,value:0};o.units+=Number(r.quantity||0);o.value+=Number(r.value||0);snapBy.set(r.snapshot_date,o);});
     const snaps=[...snapBy.values()].sort((a,b)=>a.date<b.date?-1:1).slice(-14);
@@ -777,8 +816,8 @@ const pages = {
     const expiryRisk=[{label:'Expired',value:sum(expired,'remaining_quantity'),color:COLORS.waste},{label:'≤ 3 days',value:exp3Units,color:COLORS.out},{label:'4–7 days',value:sum(exp7,'remaining_quantity'),color:COLORS.low},{label:'> 7 days',value:sum(expLater,'remaining_quantity'),color:COLORS.healthy},{label:'No expiry',value:missingExpiryUnits,color:COLORS.neutral}];
     const todayStr=isoToday();const tRecv=receiving.filter(r=>String(r.date).slice(0,10)===todayStr),tTr=transfers.filter(r=>String(r.date).slice(0,10)===todayStr);
     const actions=[
-      expired.length&&{lvl:3,ico:'⛔',t:`${qty(expiredUnits)} expired units`,m:`${expired.length} batches past expiry — record waste`,go:'expiry',b:'Review'},
-      exp3.length&&{lvl:2,ico:'⏳',t:`${qty(exp3Units)} units expire within 3 days`,m:`${exp3.length} batches`,go:'expiry',b:'Plan'},
+      expired.length&&{lvl:3,ico:'⛔',t:`${qty(expiredUnits)} expired units`,m:`${expired.length} batches past expiry — record waste`,go:'expiry',exp:'expired',b:'Review'},
+      exp3.length&&{lvl:2,ico:'⏳',t:`${qty(exp3Units)} units expire within 3 days`,m:`${exp3.length} batches`,go:'expiry',exp:'soon',b:'Open batches'},
       outWh.length&&{lvl:2,ico:'📉',t:`${outWh.length} products out of stock`,m:'Bakery Warehouse',go:'stock',b:'View'},
       lowWh.length&&{lvl:1,ico:'⚠',t:`${lowWh.length} products low in stock`,m:'Bakery Warehouse thresholds',go:'stock',b:'View'},
       missingExpiryBatches&&{lvl:2,ico:'📅',t:`${missingExpiryBatches} batches missing expiry`,m:`${qty(missingExpiryUnits)} units — update real dates`,go:'expiry',b:'Fix'},
@@ -793,7 +832,7 @@ const pages = {
       <div class="dash-hero"><div><h2>${greet}, ${esc((state.appUser?.name||'').split(' ')[0]||'team')}</h2><p>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · Joffrey’s Bakery Jeddah</p></div>
         <div class="dash-hero-stats"><div><span>Inventory value</span><strong>${money(totalValue)}</strong>${deltaTxt}</div><div><span>Today in</span><strong>${qty(sum(tRecv,'quantity'))}</strong><small>${distinctCount(tRecv,'receiving_id')} receipts</small></div><div><span>Today out</span><strong>${qty(sum(tTr,'quantity'))}</strong><small>${distinctCount(tTr,'transfer_id')} transfers</small></div></div></div>
       <div class="dash-section-head"><h3>Action center</h3><span>${actions.length?actions.length+' item(s) need attention':'All clear'}</span></div>
-      <div class="action-grid">${actions.length?actions.map(a=>`<button class="action-card lvl${a.lvl}" data-go="${a.go}"><span class="action-ico">${a.ico}</span><span class="action-body"><strong>${esc(a.t)}</strong><small>${esc(a.m)}</small></span><span class="action-btn">${a.b} ›</span></button>`).join(''):'<div class="action-card lvl0"><span class="action-ico">✓</span><span class="action-body"><strong>Everything is in order</strong><small>No expiry, stock or variance issues right now</small></span></div>'}</div>
+      <div class="action-grid">${actions.length?actions.map(a=>`<button class="action-card lvl${a.lvl}" data-go="${a.go}"${a.exp?` data-exp="${a.exp}"`:''}><span class="action-ico">${a.ico}</span><span class="action-body"><strong>${esc(a.t)}</strong><small>${esc(a.m)}</small></span><span class="action-btn">${a.b} ›</span></button>`).join(''):'<div class="action-card lvl0"><span class="action-ico">✓</span><span class="action-body"><strong>Everything is in order</strong><small>No expiry, stock or variance issues right now</small></span></div>'}</div>
       <div class="dash-section-head"><h3>Stock position</h3><span>Live from Supabase</span></div>
       <div class="dash-pro-kpis">
         ${kpi('Bakery Warehouse',qty(whUnits),`${money(whValue)} · ${whSku} SKUs`,'good')}
@@ -808,7 +847,7 @@ const pages = {
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
       <div class="chart-grid">${barChart('Top 10 products by stock value',topValue,COLORS.neutral,money)}${barChart('Top 10 products by quantity',topQty,COLORS.neutral,qty)}</div>
     `;
-    $$('.action-card[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+    $$('.action-card[data-go]').forEach(b=>b.onclick=()=>b.dataset.exp?openExpiryQuick(b.dataset.exp):go(b.dataset.go));
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
@@ -882,7 +921,7 @@ const pages = {
     const locs=(state.branches||[]).filter(b=>b.is_active!==false);
     const whId=state.warehouse?.id||locs[0]?.id;
     content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>Location<select id="cmpLoc">${locs.map(b=>`<option value="${b.id}" ${Number(b.id)===Number(whId)?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><label class="small"><span>Show</span><select id="cmpOnly"><option value="all">All items</option><option value="diff">Differences only</option></select></label><button class="btn primary" id="cmpGo">Apply</button></div>
-    <div class="info-banner"><b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <b>Tap an item</b> to see its full history. <span class="muted small">App version 20261012-11</span></div><div id="cmpNote"></div><div id="cmpTable"></div>`;
+    <div class="info-banner"><b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <b>Tap an item</b> to see its full history. <span class="muted small">App version 20261013-1</span></div><div id="cmpNote"></div><div id="cmpTable"></div>`;
     let rows=[];
     const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No 30/09 count entered — closing taken as 0">*</span>':'')},
       {key:'closing',label:'Closing Stock',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},
@@ -1250,6 +1289,15 @@ function groupTotals(rows,key,qtyKey,valueKey){const m=new Map();for(const r of 
 function monthlyCols(){return [{key:'month',label:'Month'},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
 function groupCols(label){return [{key:'group',label},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
 
+$('#quickRecv').onclick=()=>{if(!canPost())return toast('Your role cannot post receiving','error');openReceiving();};
+$('#quickTr').onclick=()=>{if(!canPost())return toast('Your role cannot post transfers','error');openTransfer();};
+$('#printDaily').onclick=()=>printDailyReport();
+(()=>{const sb=$('#sidebar');const bd=document.createElement('div');bd.id='sidebarBackdrop';bd.className='sidebar-backdrop';document.body.appendChild(bd);
+  const sync=()=>bd.classList.toggle('show',sb.classList.contains('open'));new MutationObserver(sync).observe(sb,{attributes:true,attributeFilter:['class']});
+  const close=()=>sb.classList.remove('open');bd.addEventListener('click',close);
+  document.addEventListener('click',e=>{if(!sb.classList.contains('open'))return;if(e.target.closest('#sidebar,#menuBtn'))return;close();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+  sb.addEventListener('click',e=>{if(e.target.closest('[data-page],button,a'))setTimeout(close,0);});})();
 $('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');$('#refreshBtn').onclick=async()=>{try{await requireData(true);await go(state.currentPage);}catch(e){fail(e,'Refresh failed');}};$('#logoutBtn').onclick=async()=>{await supabase.auth.signOut();};
 
 /* ---------- Quick search / command palette (Ctrl+K) and breadcrumbs ---------- */

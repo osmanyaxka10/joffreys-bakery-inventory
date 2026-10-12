@@ -117,3 +117,22 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#e3eeff!important}
 /* data-check banner */
 .health-bar{background:#fff4e5;border-color:#f0c27a;color:#7a4a00;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .health-bar .btn{margin-left:auto}
+
+/* ---- mobile polish: chart axis, contrast, sidebar backdrop, header shortcuts ---- */
+.dual-trend .dual-col{min-width:46px}
+.dual-legend{color:var(--text);font-size:11px;font-weight:600}
+.dual-values{color:var(--text)!important}
+.trend-yaxis,.trend-yaxis span{color:var(--text)}
+.hbar-label span{color:var(--text)}
+.var-badge{display:inline-block;background:#fff1d6;color:#8a4b00;border:1px solid #f0c27a;border-radius:6px;padding:0 5px;font-size:11px;line-height:16px;margin-left:4px;cursor:help}
+.sidebar-backdrop{display:none}
+.quick-btn b{font-weight:600}
+@media (max-width:860px){
+  .dual-trend{padding-bottom:6px}
+  .dual-trend .dual-col{grid-template-rows:28px 1fr 46px}
+  .dual-trend .dual-label{white-space:nowrap;overflow:visible;transform:rotate(-40deg);transform-origin:right top;font-size:10px;color:var(--text);padding:0;margin:12px 8px 0 -16px;text-align:right}
+  .sidebar-backdrop.show{display:block;position:fixed;inset:0;background:rgba(10,20,40,.45);z-index:40}
+  .sidebar{z-index:50}
+  .quick-btn b{display:none}.quick-btn{padding-left:10px;padding-right:10px}
+  .search-btn span,.search-btn kbd{display:none}
+}
