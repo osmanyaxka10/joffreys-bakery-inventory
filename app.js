@@ -90,6 +90,7 @@ function money(v){return `SAR ${num(v,2)}`;}
 function isoToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function isoDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function dateFmt(v){if(!v)return '—';const s=String(v).slice(0,10);const [y,m,d]=s.split('-');return y&&m&&d?`${d}/${m}/${y}`:esc(v);}
+function shortDateFmt(v){if(!v)return '—';const s=String(v).slice(0,10);const [y,m,d]=s.split('-');if(!y||!m||!d)return esc(v);const month=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m)-1];return `${d} ${month||m}`;}
 function dateTimeFmt(v){if(!v)return '—';const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
 function locationName(name){return String(name||'')==='Warehouse'?'Bakery Warehouse':String(name||'');}
 function displayMovement(v){return String(v||'').replaceAll('_',' ');}
@@ -195,16 +196,22 @@ async function loadAppUser(){
   $('#userCard').innerHTML=`<strong>${esc(data.name)}</strong><span>${esc(data.role)}</span><small>${esc(data.email||state.session.user.email||'')}</small>`;
 }
 
+function setSidebarOpen(open){
+  const sidebar=$('#sidebar'),backdrop=$('#sidebarBackdrop');
+  sidebar?.classList.toggle('open',!!open);backdrop?.classList.toggle('open',!!open);
+  if(backdrop)backdrop.setAttribute('aria-hidden',open?'false':'true');
+}
+
 function renderNav(){
   const navList = Array.isArray(navItems) ? navItems : navItems ? [navItems] : [];
   $('#nav').innerHTML=navList.map(([id,ico,label,href])=>id==='__g'?`<div class="nav-group">${label}</div>`:`<button data-page="${id}" data-href="${href||''}" class="${state.currentPage===id?'active':''}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('');
   const navButtonsValue = Array.from(document.querySelectorAll('#nav button'));
   const navButtons = Array.isArray(navButtonsValue) ? navButtonsValue : navButtonsValue ? [navButtonsValue] : [];
-  navButtons.forEach(b=>b.onclick=()=>{if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
+  navButtons.forEach(b=>b.onclick=()=>{setSidebarOpen(false);if(b.dataset.href){window.location.href=b.dataset.href;return;}go(b.dataset.page);});
 }
 
 async function go(page,throwOnError=false){
-  state.currentPage=page;renderNav();$('#sidebar').classList.remove('open');
+  state.currentPage=page;renderNav();setSidebarOpen(false);
   const meta=pageMeta[page]||['Inventory',''];$('#pageTitle').textContent=meta[0];$('#pageSubtitle').textContent=meta[1];paintCrumb(page);paintHealth();setLoading();
   try{await requireData();await pages[page]();return true;}catch(e){if(throwOnError)throw e;fail(e);content.innerHTML=`<div class="panel"><h3>Unable to load ${esc(meta[0])}</h3><p class="muted">${esc(e.message)}</p></div>`;return false;}
 }
@@ -219,7 +226,7 @@ function donutChart(title,items){
 }
 function barChart(title,items,color=COLORS.neutral,formatter=qty){
   const max=Math.max(0,...items.map(x=>Number(x.value||0)));
-  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const v=Number(x.value||0);const pct=max&&v>0?v/max*100:0;const zero=v<=0?' zero':'';return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span>${esc(x.label)}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill${zero}" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="hbars">${items.length?items.map(x=>{const v=Number(x.value||0);const pct=max&&v>0?v/max*100:0;const zero=v<=0?' zero':'';const warning=x.warning?`<em class="stock-variance-badge" title="${esc(x.warningTitle||'System balance differs from the verified closing-count movement audit')}">${esc(x.warning)}</em>`:'';return `<div class="hbar-row" title="${esc(x.label)}: ${esc(formatter(x.value))}"><div class="hbar-label"><span class="hbar-name">${esc(x.label)}${warning}</span><strong>${formatter(x.value)}</strong></div><div class="hbar-track"><div class="hbar-fill${zero}" style="width:${pct}%;background:${x.color||color}"></div></div></div>`;}).join(''):'<div class="empty">No data in selected period</div>'}</div></div>`;
 }
 function trendChart(title,items,color=COLORS.receiving,formatter=qty){
   const max=Math.max(0,...items.map(x=>Number(x.value||0)));
@@ -346,7 +353,7 @@ function dualTrendChart(title,items,inLabel='Qty In',outLabel='Qty Out',outColor
   const max=Math.max(0,...items.flatMap(x=>[Number(x.inValue||0),Number(x.outValue||0)]));
   if(!items.length||max<=0)return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${outColor}"></i>${esc(outLabel)}</span></div><div class="empty chart-empty">No activity in selected period</div></div>`;
   const mid=max/2;
-  const bars=items.map(x=>{const iv=Number(x.inValue||0),ov=Number(x.outValue||0),ih=iv>0?iv/max*100:0,oh=ov>0?ov/max*100:0;return `<div class="dual-col" title="${esc(x.label)} · ${esc(inLabel)} ${qty(iv)} · ${esc(outLabel)} ${qty(ov)}"><div class="dual-values"><span>${qty(iv)}</span><span>${qty(ov)}</span></div><div class="dual-bars"><div class="dual-bar${iv<=0?' zero':''}" style="height:${ih}%;background:${COLORS.receiving}"></div><div class="dual-bar${ov<=0?' zero':''}" style="height:${oh}%;background:${outColor}"></div></div><div class="dual-label">${esc(x.label)}</div></div>`;}).join('');
+  const bars=items.map(x=>{const iv=Number(x.inValue||0),ov=Number(x.outValue||0),ih=iv>0?iv/max*100:0,oh=ov>0?ov/max*100:0;return `<div class="dual-col" title="${esc(x.fullLabel||x.label)} · ${esc(inLabel)} ${qty(iv)} · ${esc(outLabel)} ${qty(ov)}"><div class="dual-values"><span>${qty(iv)}</span><span>${qty(ov)}</span></div><div class="dual-bars"><div class="dual-bar${iv<=0?' zero':''}" style="height:${ih}%;background:${COLORS.receiving}"></div><div class="dual-bar${ov<=0?' zero':''}" style="height:${oh}%;background:${outColor}"></div></div><div class="dual-label">${esc(x.label)}</div></div>`;}).join('');
   return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="dual-legend"><span><i style="background:${COLORS.receiving}"></i>${esc(inLabel)}</span><span><i style="background:${outColor}"></i>${esc(outLabel)}</span></div><div class="trend-scaled"><div class="trend-yaxis"><span>${qty(max)}</span><span>${qty(mid)}</span><span>0</span></div><div class="dual-trend">${bars}</div></div></div>`;
 }
 
@@ -753,8 +760,8 @@ const pages = {
     const topQty=[...productTotals].filter(x=>x.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,10).map(x=>({label:x.product_name,value:x.quantity}));
 
     const dailyMap=new Map();
-    for(const r of receiving){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).inValue+=Number(r.quantity||0);}
-    for(const r of transfers){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).outValue+=Number(r.quantity||0);}
+    for(const r of receiving){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:shortDateFmt(d),fullLabel:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).inValue+=Number(r.quantity||0);}
+    for(const r of transfers){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:shortDateFmt(d),fullLabel:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).outValue+=Number(r.quantity||0);}
     const activityTrend=[...dailyMap.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([,x])=>x);
 
     const [repR,varR,snapR]=await Promise.allSettled([
@@ -767,6 +774,9 @@ const pages = {
     const varRows=(varR.status==='fulfilled'&&!varR.value.error?varR.value.data:[])||[];
     const audVars=varRows.map(r=>{const o=auditBaseline(r.product_name);return o===null?0:Number(r.system_qty)-(o+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments));}).filter(v=>v!==0);
     const audNet=audVars.reduce((a,b)=>a+b,0);
+    const normProductName=v=>String(v||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const auditVarianceByName=new Map(varRows.map(r=>{const opening=auditBaseline(r.product_name);const v=opening===null?null:Number(r.system_qty)-(opening+Number(r.received)+Number(r.transfer_in)+Number(r.transfer_out)+Number(r.waste)+Number(r.adjustments));return [normProductName(r.product_name),v];}));
+    for(const item of [...topValue,...topQty]){const v=auditVarianceByName.get(normProductName(item.label));if(v!==null&&v!==undefined&&Math.abs(v)>0.00001){item.warning=`${v>0?'+':''}${qty(v)}`;item.warningTitle=`Audit variance ${v>0?'+':''}${qty(v)} units against the verified 30/09/2026 opening count plus recorded movements.`;}}
     const snapBy=new Map();((snapR.status==='fulfilled'&&!snapR.value.error?snapR.value.data:[])||[]).forEach(r=>{const o=snapBy.get(r.snapshot_date)||{date:r.snapshot_date,units:0,value:0};o.units+=Number(r.quantity||0);o.value+=Number(r.value||0);snapBy.set(r.snapshot_date,o);});
     const snaps=[...snapBy.values()].sort((a,b)=>a.date<b.date?-1:1).slice(-14);
     const prevVal=snaps.length>1?snaps[snaps.length-2].value:null;
@@ -778,7 +788,7 @@ const pages = {
     const todayStr=isoToday();const tRecv=receiving.filter(r=>String(r.date).slice(0,10)===todayStr),tTr=transfers.filter(r=>String(r.date).slice(0,10)===todayStr);
     const actions=[
       expired.length&&{lvl:3,ico:'⛔',t:`${qty(expiredUnits)} expired units`,m:`${expired.length} batches past expiry — record waste`,go:'expiry',b:'Review'},
-      exp3.length&&{lvl:2,ico:'⏳',t:`${qty(exp3Units)} units expire within 3 days`,m:`${exp3.length} batches`,go:'expiry',b:'Plan'},
+      exp3.length&&{lvl:2,ico:'⏳',t:`${qty(exp3Units)} units expire within 3 days`,m:`${exp3.length} batches · tap to filter the batch list`,go:'expiry',key:'expiring3',b:'Review batches'},
       outWh.length&&{lvl:2,ico:'📉',t:`${outWh.length} products out of stock`,m:'Bakery Warehouse',go:'stock',b:'View'},
       lowWh.length&&{lvl:1,ico:'⚠',t:`${lowWh.length} products low in stock`,m:'Bakery Warehouse thresholds',go:'stock',b:'View'},
       missingExpiryBatches&&{lvl:2,ico:'📅',t:`${missingExpiryBatches} batches missing expiry`,m:`${qty(missingExpiryUnits)} units — update real dates`,go:'expiry',b:'Fix'},
@@ -793,7 +803,7 @@ const pages = {
       <div class="dash-hero"><div><h2>${greet}, ${esc((state.appUser?.name||'').split(' ')[0]||'team')}</h2><p>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · Joffrey’s Bakery Jeddah</p></div>
         <div class="dash-hero-stats"><div><span>Inventory value</span><strong>${money(totalValue)}</strong>${deltaTxt}</div><div><span>Today in</span><strong>${qty(sum(tRecv,'quantity'))}</strong><small>${distinctCount(tRecv,'receiving_id')} receipts</small></div><div><span>Today out</span><strong>${qty(sum(tTr,'quantity'))}</strong><small>${distinctCount(tTr,'transfer_id')} transfers</small></div></div></div>
       <div class="dash-section-head"><h3>Action center</h3><span>${actions.length?actions.length+' item(s) need attention':'All clear'}</span></div>
-      <div class="action-grid">${actions.length?actions.map(a=>`<button class="action-card lvl${a.lvl}" data-go="${a.go}"><span class="action-ico">${a.ico}</span><span class="action-body"><strong>${esc(a.t)}</strong><small>${esc(a.m)}</small></span><span class="action-btn">${a.b} ›</span></button>`).join(''):'<div class="action-card lvl0"><span class="action-ico">✓</span><span class="action-body"><strong>Everything is in order</strong><small>No expiry, stock or variance issues right now</small></span></div>'}</div>
+      <div class="action-grid">${actions.length?actions.map(a=>`<button class="action-card lvl${a.lvl}" data-go="${a.go}" data-action="${a.key||''}" aria-label="${esc(a.t)} — ${esc(a.b)}"><span class="action-ico">${a.ico}</span><span class="action-body"><strong>${esc(a.t)}</strong><small>${esc(a.m)}</small></span><span class="action-btn">${a.b} ›</span></button>`).join(''):'<div class="action-card lvl0"><span class="action-ico">✓</span><span class="action-body"><strong>Everything is in order</strong><small>No expiry, stock or variance issues right now</small></span></div>'}</div>
       <div class="dash-section-head"><h3>Stock position</h3><span>Live from Supabase</span></div>
       <div class="dash-pro-kpis">
         ${kpi('Bakery Warehouse',qty(whUnits),`${money(whValue)} · ${whSku} SKUs`,'good')}
@@ -808,7 +818,7 @@ const pages = {
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
       <div class="chart-grid">${barChart('Top 10 products by stock value',topValue,COLORS.neutral,money)}${barChart('Top 10 products by quantity',topQty,COLORS.neutral,qty)}</div>
     `;
-    $$('.action-card[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+    $('.action-card[data-go]').forEach(b=>b.onclick=()=>{if(b.dataset.action==='expiring3')state.expiryFilterSoon=true;go(b.dataset.go);});
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
@@ -870,7 +880,8 @@ const pages = {
     renderDataTable('#expiryTable',rows,[
       {key:'product_name',label:'Product'},{key:'product_code',label:'SKU'},{key:'batch_no',label:'Batch'},{key:'branch_name',label:'Location',type:'location'},{key:'remaining_quantity',label:'Quantity Remaining',type:'qty',align:'right'},
       {key:'received_date',label:'Received Date',type:'date'},{key:'expiry_date',label:'Expiry Date',type:'date'},{key:'days_until_expiry',label:'Days Remaining',type:'qty',align:'right'},{key:'supplier_name',label:'Supplier'},{key:'expiry_status',label:'Status',type:'badge'}
-    ],{filters:[{key:'expiry_status',label:'Expiry Status'},{key:'branch_name',label:'Location',type:'location'},{key:'supplier_name',label:'Supplier'}],filename:'joffreys-expiry',title:'Joffrey’s Bakery Expiry / FEFO Report',pageSize:50,sortKey:'expiry_date'});
+    ],{filters:[{key:'expiry_status',label:'Expiry Status'},{key:'branch_name',label:'Location',type:'location'},{key:'supplier_name',label:'Supplier'}],filename:'joffreys-expiry',title:'Joffrey’s Bakery Expiry / FEFO Report',pageSize:50,sortKey:'expiry_date',defaults:state.expiryFilterSoon?{expiry_status:'Within 3 Days'}:undefined});
+    state.expiryFilterSoon=false;
     renderDataTable('#expiryAuditTable',auditData||[],[
       {key:'changed_at',label:'Changed At',type:'datetime'},{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location',type:'location'},{key:'batch_id',label:'Batch ID'},
       {key:'old_expiry_date',label:'Old Expiry',type:'date'},{key:'new_expiry_date',label:'New Expiry',type:'date'},{key:'old_batch_no',label:'Old Batch'},{key:'new_batch_no',label:'New Batch'},{key:'changed_by_name',label:'Changed By'},{key:'reason',label:'Reason'}
@@ -1250,7 +1261,13 @@ function groupTotals(rows,key,qtyKey,valueKey){const m=new Map();for(const r of 
 function monthlyCols(){return [{key:'month',label:'Month'},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
 function groupCols(label){return [{key:'group',label},{key:'transactions',label:'Transactions',type:'qty',align:'right'},{key:'line_count',label:'Lines',type:'qty',align:'right'},{key:'units',label:'Units',type:'qty',align:'right'},{key:'value',label:'Value',type:'money',align:'right'}];}
 
-$('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');$('#refreshBtn').onclick=async()=>{try{await requireData(true);await go(state.currentPage);}catch(e){fail(e,'Refresh failed');}};$('#logoutBtn').onclick=async()=>{await supabase.auth.signOut();};
+$('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+$('#menuBtn').onclick=()=>setSidebarOpen(!$('#sidebar').classList.contains('open'));
+$('#sidebarBackdrop').onclick=()=>setSidebarOpen(false);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')setSidebarOpen(false);});
+$('#newReceivingBtn').onclick=()=>openReceiving();$('#newTransferBtn').onclick=()=>openTransfer();
+$('#printDailyReportBtn').onclick=()=>{const oldTitle=document.title;document.title=`Joffrey's Bakery Daily Report ${isoToday()}`;window.print();window.addEventListener('afterprint',()=>{document.title=oldTitle;},{once:true});};
+$('#refreshBtn').onclick=async()=>{const btn=$('#refreshBtn');btn.disabled=true;btn.textContent='↻ Refreshing…';try{await requireData(true);await go(state.currentPage);}catch(e){fail(e,'Refresh failed');}finally{btn.disabled=false;btn.textContent='↻ Refresh';}};$('#logoutBtn').onclick=async()=>{await supabase.auth.signOut();};
 
 /* ---------- Quick search / command palette (Ctrl+K) and breadcrumbs ---------- */
 function crumbFor(page){let grp='';for(const [id,,label] of navItems){if(id==='__g'){grp=label;continue;}if(id===page)return grp;}return '';}
