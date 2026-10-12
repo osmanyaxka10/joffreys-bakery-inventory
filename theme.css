@@ -100,3 +100,16 @@ button.action-card:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(
 .cmdk-foot{display:flex;gap:16px;padding:9px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);background:#fafbfd}
 .table-card{overflow:visible}.table-wrap{border-radius:0 0 var(--radius) var(--radius)}.table-toolbar{border-radius:var(--radius) var(--radius) 0 0}
 .grid-pop{max-height:min(60vh,380px)}
+/* Oracle-style document lists */
+.doc-tabs{display:flex;gap:4px;margin-bottom:12px}.doc-tabs button{border:1px solid var(--line-strong);background:#fff;border-radius:10px 10px 0 0;padding:9px 16px;font-weight:700;color:var(--muted);cursor:pointer}.doc-tabs button.on{background:#0b3b8c;border-color:#0b3b8c;color:#fff}
+.doc-bar{display:flex;align-items:center;gap:0;margin-bottom:10px;background:linear-gradient(180deg,#14439a,#0b2f73);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.doc-bar-title{padding:10px 18px;font-weight:800;color:#fff;background:#0a2a66;letter-spacing:.02em}
+.doc-bar-btn{border:0;background:transparent;color:#dbe7ff;padding:10px 16px;font-size:13px;cursor:pointer;border-left:1px solid rgba(255,255,255,.12)}.doc-bar-btn:hover{background:rgba(255,255,255,.12);color:#fff}
+.doc-filter{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}.doc-filter.hidden{display:none}
+.doc-filter label{display:grid;gap:4px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.doc-filter select,.doc-filter input{min-width:150px;padding:8px 10px;font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);font-weight:500}
+tr.clickable{cursor:pointer}tr.clickable:hover td{background:#e3eeff!important}
+.doc-link{color:#0a4fb8;font-weight:800;text-decoration:underline;text-underline-offset:2px}
+.doc-status{font-style:normal;display:inline-block;padding:2px 9px;border-radius:99px;background:#e6f6ec;color:#117a3a;font-size:11px;font-weight:800}
+.doc-head{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 22px;padding:16px 18px;margin-bottom:12px}
+.doc-head div{display:grid;gap:3px;min-width:0}.doc-head span{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.doc-head strong{font-size:14px;overflow-wrap:anywhere}.doc-head .wide{grid-column:1/-1}
+@media(max-width:900px){.doc-head{grid-template-columns:repeat(2,minmax(0,1fr))}.doc-filter select,.doc-filter input{min-width:130px}}

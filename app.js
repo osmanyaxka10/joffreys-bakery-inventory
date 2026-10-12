@@ -294,10 +294,11 @@ function renderDataTable(host,rows,columns,opt={}){
     let out=rows.filter(r=>(!q||columns.some(c=>String(rawExportValue(r[c.key],c)).toLowerCase().includes(q)))&&Object.entries(active).every(([k,v])=>!v||String(r[k]??'')===v)&&cf.every(([k,v])=>{const col=columns.find(c=>c.key===k);return String(rawExportValue(r[k],col||{})).toLowerCase().includes(v);}));
     if(sortKey){const col=columns.find(c=>c.key===sortKey);out=[...out].sort((a,b)=>{const av=a[sortKey],bv=b[sortKey];let d;if(['money','qty'].includes(col?.type))d=Number(av||0)-Number(bv||0);else d=String(av??'').localeCompare(String(bv??''),undefined,{numeric:true});return sortDir==='asc'?d:-d;});}return out;};
   const draw=()=>{const cols=visible();const filtered=getFiltered();const pages=Math.max(1,Math.ceil(filtered.length/pageSize));if(page>pages)page=pages;const slice=filtered.slice((page-1)*pageSize,page*pageSize);count.textContent=`${filtered.length} rows`;pageLabel.textContent=`Page ${page} / ${pages}`;
-    tbody.innerHTML=slice.length?slice.map(r=>`<tr>${cols.map(c=>{const cc={...c,_row:r};return `<td class="${c.align==='right'?'num':''}">${tableCell(r[c.key],cc)}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${cols.length}" class="empty">No records found</td></tr>`;
+    tbody.innerHTML=slice.length?slice.map(r=>`<tr${opt.onRow?` class="clickable" data-rk="${esc(String(r[opt.rowKey]))}"`:''}>${cols.map(c=>{const cc={...c,_row:r};return `<td class="${c.align==='right'?'num':''}">${tableCell(r[c.key],cc)}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${cols.length}" class="empty">No records found</td></tr>`;
     if(hasTotals&&filtered.length&&cols.some(totalable)){let labelDone=false;tfoot.innerHTML=`<tr class="grid-total">${cols.map(c=>{if(totalable(c)){const s=filtered.reduce((a,r)=>a+Number(r[c.key]||0),0);return `<td class="num">${c.type==='money'?money(s):qty(s)}</td>`;}if(!labelDone){labelDone=true;return `<td>Total · ${filtered.length} rows</td>`;}return '<td></td>';}).join('')}</tr>`;}else tfoot.innerHTML='';
     $('[data-prev]',el).disabled=page<=1;$('[data-next]',el).disabled=page>=pages;$$('th[data-sort]',el).forEach(th=>{const mark=$('.sortmark',th);mark.textContent=th.dataset.sort===sortKey?(sortDir==='asc'?'▲':'▼'):'';});};
   search.oninput=()=>{page=1;draw();};$$('[data-filter]',el).forEach(s=>s.onchange=()=>{page=1;draw();});$('[data-prev]',el).onclick=()=>{page--;draw();};$('[data-next]',el).onclick=()=>{page++;draw();};
+  if(opt.onRow)tbody.onclick=e=>{const tr=e.target.closest('tr[data-rk]');if(!tr)return;const row=rows.find(x=>String(x[opt.rowKey])===tr.dataset.rk);if(row)opt.onRow(row);};
   thead.onclick=e=>{const th=e.target.closest('th[data-sort]');if(!th)return;const k=th.dataset.sort;if(sortKey===k)sortDir=sortDir==='asc'?'desc':'asc';else{sortKey=k;sortDir='asc';}draw();};
   const pop=$('[data-colpop]',el);$('[data-cols]',el).onclick=e=>{e.stopPropagation();$$('.grid-pop').forEach(p=>{if(p!==pop)p.classList.add('hidden');});pop.classList.toggle('hidden');};pop.onclick=e=>e.stopPropagation();
   $$('[data-colchk]',el).forEach(c=>c.onchange=()=>{if(c.checked)hidden.delete(c.dataset.colchk);else{if(columns.length-hidden.size<=1){c.checked=true;return;}hidden.add(c.dataset.colchk);}persist();drawHead();draw();});
@@ -506,6 +507,114 @@ async function dashboardRetool(){
   $('#rtApply').onclick=()=>{rt.from=$('#rtFrom').value||from0;rt.to=$('#rtTo').value||today;rt.loc=$('#rtLoc').value;dashboardRetool();};
 }
 
+/* ---------- Oracle-style document lists (Receiving / Transfers): list -> click -> document detail -> print ---------- */
+const DOC_PRESETS=[['today','Today'],['yesterday','Yesterday'],['this_week','This Week'],['last_7','Last 7 Days'],['this_month','Current Month'],['last_month','Last Month'],['custom','Custom']];
+const docState={receiving:{preset:'this_month',from:'',to:'',doc:'',a:'',b:'',tab:'docs'},transfer:{preset:'this_month',from:'',to:'',doc:'',a:'',b:'',tab:'docs'}};
+function docView(kind){return kind==='receiving'?'v_daily_receiving_report':'v_daily_transfer_report';}
+async function loadDocRows(kind){
+  const st=docState[kind];const r=st.preset==='custom'?{from:st.from,to:st.to}:periodRange(st.preset);
+  if(!r.from||!r.to)throw new Error('Choose From and To dates');if(r.from>r.to)throw new Error('From date is after To date');
+  const {data,error}=await supabase.from(docView(kind)).select('*').gte('date',r.from).lte('date',r.to).order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);
+  if(error)throw error;return data||[];
+}
+function groupDocs(rows,kind){
+  const m=new Map();
+  for(const r of rows){
+    const id=kind==='receiving'?r.receiving_id:r.transfer_id;const k=id??`${r.reference_no}|${r.date}`;
+    if(!m.has(k))m.set(k,{key:String(k),ref:r.reference_no||String(id||'-'),invoice_no:r.invoice_no||'',date:r.date,status:kind==='receiving'?'Received':'Delivered',
+      from:kind==='receiving'?(r.supplier_name||'—'):(r.from_branch||'—'),to:kind==='receiving'?(r.branch_name||'—'):(r.to_branch||'—'),
+      created_by:r.performed_by||'—',created_at:r.created_at,notes:(kind==='receiving'?r.receiving_notes:r.transfer_notes)||'',lines:[],line_count:0,qty:0,value:0});
+    const d=m.get(k);d.lines.push(r);d.line_count++;d.qty+=Number(r.quantity||0);d.value+=Number(kind==='receiving'?r.total_cost:r.total_value||0);
+  }
+  return [...m.values()].sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.created_at||'').localeCompare(String(a.created_at||'')));
+}
+function docColumns(kind){
+  return [
+    {key:'ref',label:'Document',render:(v,r)=>`<a class="doc-link">${esc(v)}</a>${kind==='receiving'&&r.invoice_no&&r.invoice_no!==v?` <span class="muted">(${esc(r.invoice_no)})</span>`:''}`},
+    {key:'status',label:'Status',render:v=>`<span class="doc-status">${esc(v)}</span>`},
+    {key:'from',label:kind==='receiving'?'Supplier':'From Location',render:v=>esc(locationName(v))},
+    {key:'to',label:kind==='receiving'?'Received At':'To Location',render:v=>esc(locationName(v))},
+    {key:'date',label:kind==='receiving'?'Received Date':'Delivery Date',type:'date'},
+    {key:'line_count',label:'Lines',type:'qty',align:'right'},
+    {key:'qty',label:'Total Qty',type:'qty',align:'right'},
+    {key:'value',label:'Value',type:'money',align:'right'},
+    {key:'created_by',label:'Created By'},
+    {key:'created_at',label:'Changed At',type:'datetime'}
+  ];
+}
+function docLineColumns(kind){
+  const base=[{key:'no',label:'#',align:'right',noTotal:true},{key:'product_code',label:'Article / SKU'},{key:'product_name',label:'Article'},{key:'unit',label:'Unit'},{key:'quantity',label:'Qty',type:'qty',align:'right'}];
+  if(kind==='receiving')base.push({key:'batch_no',label:'Batch'},{key:'expiry_date',label:'Expiry',type:'date'});
+  base.push({key:'unit_cost',label:'Unit Cost',type:'money',align:'right'},{key:kind==='receiving'?'total_cost':'total_value',label:'Value',type:'money',align:'right'});
+  return base;
+}
+function docsPage(kind){
+  const st=docState[kind],isR=kind==='receiving',title=isR?'Receiving':'Transfers';
+  const range=()=>st.preset==='custom'?{from:st.from,to:st.to}:periodRange(st.preset);
+  const locs=(state.branches||[]).map(b=>b.name),sups=(state.suppliers||[]).map(s=>s.name);
+  const opts=(arr,sel,all,loc=true)=>`<option value="">${all}</option>${arr.map(n=>`<option value="${esc(n)}" ${n===sel?'selected':''}>${esc(loc?locationName(n):n)}</option>`).join('')}`;
+  const r0=range();
+  content.innerHTML=`<div class="page-actions"><button class="btn primary" id="docNew" ${canPost()?'':'disabled'}>${isR?'＋ New Receiving':'⇄ New Transfer'}</button></div>
+  <div class="doc-tabs"><button class="${st.tab==='docs'?'on':''}" data-dt="docs">${title} Documents</button><button class="${st.tab==='date'?'on':''}" data-dt="date">By Date</button></div>
+  <div id="docBody"></div>`;
+  $('#docNew').onclick=isR?openReceiving:openTransfer;
+  $$('.doc-tabs [data-dt]').forEach(b=>b.onclick=()=>{st.tab=b.dataset.dt;docsPage(kind);});
+  const body=$('#docBody');
+  if(st.tab==='date'){
+    body.innerHTML=`<div class="info-banner">Grouped by date. Click a date to see every document of that day; each date can be printed (A4, one document per page).</div><div id="docDateList"></div>`;
+    (async()=>{try{const {data,error}=await supabase.from(docView(kind)).select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;renderTransactionDateList('#docDateList',groupTransactionDates(data||[],isR?'receiving':'transfer'),isR?'receiving':'transfer');}catch(e){fail(e,'Load failed');}})();
+    return;
+  }
+  body.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${title}</span><button class="doc-bar-btn" id="docHide">Hide Filter</button><button class="doc-bar-btn" id="docRefresh">Refresh</button><button class="doc-bar-btn" id="docXls">Export to Excel</button><button class="doc-bar-btn" id="docPrintList">Print List</button></div>
+  <div class="doc-filter" id="docFilter">
+    <label>Time Period<select id="dfPreset">${DOC_PRESETS.map(([v,l])=>`<option value="${v}" ${v===st.preset?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label>From<input type="date" id="dfFrom" value="${esc(r0.from)}"></label><label>To<input type="date" id="dfTo" value="${esc(r0.to)}"></label>
+    ${isR?`<label>Supplier<select id="dfA">${opts(sups,st.a,'All suppliers',false)}</select></label><label>Received At<select id="dfB">${opts(locs,st.b,'All locations')}</select></label>`
+         :`<label>From Location<select id="dfA">${opts(locs,st.a,'All locations')}</select></label><label>To Location<select id="dfB">${opts(locs,st.b,'All locations')}</select></label>`}
+    <label>Document<input id="dfDoc" placeholder="Reference / invoice no" value="${esc(st.doc)}"></label>
+    <button class="btn primary" id="dfApply">Apply</button>
+  </div>
+  <div id="docList"></div>`;
+  let all=[],shown=[];
+  const draw=()=>{
+    const q=st.doc.trim().toLowerCase();
+    shown=all.filter(d=>(!st.a||d.from===st.a)&&(!st.b||d.to===st.b)&&(!q||`${d.ref} ${d.invoice_no}`.toLowerCase().includes(q)));
+    renderDataTable('#docList',shown,docColumns(kind),{rowKey:'key',onRow:d=>showDoc(kind,d,()=>docsPage(kind)),filename:`joffreys-${kind}-documents`,title:`Joffrey’s Bakery ${title} Documents`,pageSize:100,sortKey:'date',sortDir:'desc'});
+  };
+  const reload=async()=>{try{all=groupDocs(await loadDocRows(kind),kind);draw();}catch(e){fail(e,'Load failed');}};
+  const readFilters=()=>{st.preset=$('#dfPreset').value;st.from=$('#dfFrom').value;st.to=$('#dfTo').value;st.a=$('#dfA').value;st.b=$('#dfB').value;st.doc=$('#dfDoc').value;};
+  $('#dfPreset').onchange=()=>{const p=$('#dfPreset').value;if(p!=='custom'){const r=periodRange(p);$('#dfFrom').value=r.from;$('#dfTo').value=r.to;}};
+  ['dfFrom','dfTo'].forEach(id=>$('#'+id).onchange=()=>{$('#dfPreset').value='custom';});
+  $('#dfApply').onclick=async()=>{readFilters();await reload();};
+  $('#docRefresh').onclick=async()=>{readFilters();await reload();};
+  $('#docHide').onclick=()=>{const f=$('#docFilter');f.classList.toggle('hidden');$('#docHide').textContent=f.classList.contains('hidden')?'Show Filter':'Hide Filter';};
+  $('#docXls').onclick=()=>exportRowsExcel(shown,docColumns(kind).map(c=>({...c,render:undefined})),`joffreys-${kind}-documents-${isoToday()}`);
+  $('#docPrintList').onclick=()=>printRows(shown,docColumns(kind).map(c=>({...c,render:undefined})),`Joffrey’s Bakery ${title} Documents`);
+  reload();
+}
+function showDoc(kind,d,back){
+  const isR=kind==='receiving';const lines=d.lines.map((l,i)=>({...l,no:i+1}));
+  content.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${isR?'Receiving':'Transfer'}</span><button class="doc-bar-btn" id="ddBack">◂ Overview</button><button class="doc-bar-btn" id="ddPrint">Print</button><button class="doc-bar-btn" id="ddXls">Export to Excel</button></div>
+  <div class="doc-head panel">
+    <div><span>${isR?'Receiving':'Transfer'}</span><strong>${esc(d.ref)}</strong></div>
+    <div><span>Status</span><strong><i class="doc-status">${esc(d.status)}</i></strong></div>
+    <div><span>${isR?'Received Date':'Delivery Date'}</span><strong>${esc(dateFmt(d.date))}</strong></div>
+    <div><span>${isR?'Supplier':'From Location'}</span><strong>${esc(locationName(d.from))}</strong></div>
+    <div><span>${isR?'Received At':'To Location'}</span><strong>${esc(locationName(d.to))}</strong></div>
+    ${isR?`<div><span>Supplier Invoice No</span><strong>${esc(d.invoice_no||'—')}</strong></div>`:''}
+    <div><span>Created By</span><strong>${esc(d.created_by)}</strong></div>
+    <div><span>Changed At</span><strong>${esc(dateTimeFmt(d.created_at))}</strong></div>
+    <div class="wide"><span>Information</span><strong>${esc(d.notes||'—')}</strong></div>
+  </div>
+  <div id="docLines"></div>`;
+  $('#ddBack').onclick=back;
+  $('#ddPrint').onclick=()=>printInvoices(kind,d.lines,d.date);
+  const cols=docLineColumns(kind);
+  $('#ddXls').onclick=()=>exportRowsExcel(lines,cols,`joffreys-${kind}-${d.ref}`);
+  renderDataTable('#docLines',lines,cols,{filename:`joffreys-${kind}-${d.ref}`,title:`${isR?'Receiving':'Transfer'} ${d.ref}`,pageSize:500});
+  window.scrollTo?.(0,0);
+}
+
 const pages = {
   async dashboard(){
     ensureDashboardProStyles();
@@ -629,25 +738,9 @@ const pages = {
     $('#mClear').onclick=()=>{$('#mFrom').value='';$('#mTo').value='';render(latest.slice(0,1000));};
   },
 
-  async receiving(){
-    const {data,error}=await supabase.from('v_daily_receiving_report').select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;
-    const rows=data||[], groups=groupTransactionDates(rows,'receiving');
-    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newReceiving" ${canPost()?'':'disabled'}>＋ New Receiving</button></div>
-      <div class="info-banner">Receiving is grouped by <b>Receiving Date</b>. Click a date to see every receiving transaction and all products received that day. Each date can be printed or saved as PDF.</div>
-      <div id="receivingDateList"></div>`;
-    $('#newReceiving').onclick=openReceiving;
-    renderTransactionDateList('#receivingDateList',groups,'receiving');
-  },
+  async receiving(){docsPage('receiving');},
 
-  async transfers(){
-    const {data,error}=await supabase.from('v_daily_transfer_report').select('*').order('date',{ascending:false}).order('created_at',{ascending:false}).limit(5000);if(error)throw error;
-    const rows=data||[], groups=groupTransactionDates(rows,'transfer');
-    content.innerHTML=`<div class="page-actions"><button class="btn primary" id="newTransfer" ${canPost()?'':'disabled'}>⇄ New Transfer</button></div>
-      <div class="info-banner">Transfers are grouped by <b>Transfer Date</b>. Click a date to see every transfer transaction and all products transferred that day. Each date can be printed or saved as PDF.</div>
-      <div id="transferDateList"></div>`;
-    $('#newTransfer').onclick=openTransfer;
-    renderTransactionDateList('#transferDateList',groups,'transfer');
-  },
+  async transfers(){docsPage('transfer');},
 
   async adjustments(){
     const {data,error}=await supabase.from('v_adjustment_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
