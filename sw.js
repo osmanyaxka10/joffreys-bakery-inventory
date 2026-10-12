@@ -1,4 +1,4 @@
-const CACHE_NAME = 'joffreys-bakery-pwa-v20261012-9';
+const CACHE_NAME = 'joffreys-bakery-pwa-v20261012-10';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
