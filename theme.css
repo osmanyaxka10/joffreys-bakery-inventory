@@ -117,14 +117,3 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#e3eeff!important}
 /* data-check banner */
 .health-bar{background:#fff4e5;border-color:#f0c27a;color:#7a4a00;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .health-bar .btn{margin-left:auto}
-
-
-/* High-contrast chart text in both theme modes */
-html[data-theme="dark"],body[data-theme="dark"],html.dark-mode,body.dark-mode{
-  --bg:#0b1220;--panel:#111827;--line:#293548;--line-strong:#3b4a60;--text:#f3f4f6;--muted:#a7b4c8;
-}
-html[data-theme="dark"] .chart-card,body[data-theme="dark"] .chart-card,html.dark-mode .chart-card,body.dark-mode .chart-card{background:var(--panel);color:var(--text);border-color:var(--line)}
-html[data-theme="dark"] .chart-title,body[data-theme="dark"] .chart-title,html.dark-mode .chart-title,body.dark-mode .chart-title{color:var(--text)}
-html[data-theme="dark"] .dual-values,html[data-theme="dark"] .dual-values span,body[data-theme="dark"] .dual-values,body[data-theme="dark"] .dual-values span,html.dark-mode .dual-values,html.dark-mode .dual-values span,body.dark-mode .dual-values,body.dark-mode .dual-values span{color:var(--text)}
-html[data-theme="dark"] .dual-label,body[data-theme="dark"] .dual-label,html.dark-mode .dual-label,body.dark-mode .dual-label{color:var(--muted)}
-html[data-theme="dark"] .chart-legend,body[data-theme="dark"] .chart-legend,html.dark-mode .chart-legend,body.dark-mode .chart-legend{color:var(--text)}
