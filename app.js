@@ -202,7 +202,7 @@ function renderNav(){
 
 async function go(page,throwOnError=false){
   state.currentPage=page;renderNav();$('#sidebar').classList.remove('open');
-  const meta=pageMeta[page]||['Inventory',''];$('#pageTitle').textContent=meta[0];$('#pageSubtitle').textContent=meta[1];paintCrumb(page);setLoading();
+  const meta=pageMeta[page]||['Inventory',''];$('#pageTitle').textContent=meta[0];$('#pageSubtitle').textContent=meta[1];paintCrumb(page);paintHealth();setLoading();
   try{await requireData();await pages[page]();return true;}catch(e){if(throwOnError)throw e;fail(e);content.innerHTML=`<div class="panel"><h3>Unable to load ${esc(meta[0])}</h3><p class="muted">${esc(e.message)}</p></div>`;return false;}
 }
 
@@ -833,18 +833,18 @@ const pages = {
 
   async compare(){
     const to0=isoToday();let from='2026-10-01',to=to0;
-    content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><button class="btn primary" id="cmpGo">Apply</button></div>
-    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <span class="muted small">App version 20261012-7</span></div><div id="cmpTable"></div>`;
+    content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><label class="small"><span>Show</span><select id="cmpOnly"><option value="all">All items</option><option value="diff">Differences only</option></select></label><button class="btn primary" id="cmpGo">Apply</button></div>
+    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <span class="muted small">App version 20261012-8</span></div><div id="cmpTable"></div>`;
     let rows=[];
     const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No verified 30/09 count — closing taken as 0">*</span>':'')},
       {key:'closing',label:'Closing Stock',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},
       {key:'waste',label:'Waste',type:'qty',align:'right'},{key:'adjustments',label:'Adjust.',type:'qty',align:'right'},{key:'available',label:'Available Stock',type:'qty',align:'right'},
       {key:'system',label:'System Stock',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right',render:v=>Math.abs(v)>0.00001?`<b class="audit-variance">${v>0?'+':''}${qty(v)}</b>`:'0'}];
-    const draw=()=>{const q=$('#cmpQ').value.trim().toLowerCase();const f=rows.filter(r=>!q||`${r.product_name} ${r.product_code}`.toLowerCase().includes(q));
+    const draw=()=>{const q=$('#cmpQ').value.trim().toLowerCase();const only=$('#cmpOnly').value==='diff';const f=rows.filter(r=>(!q||`${r.product_name} ${r.product_code}`.toLowerCase().includes(q))&&(!only||Math.abs(r.diff)>0.00001));
       renderDataTable('#cmpTable',f,cols,{filename:'joffreys-compare-sheet',title:`Joffrey’s Bakery Compare Sheet ${dateFmt(from)} – ${dateFmt(to)}`,pageSize:200,sortKey:'product_name',sortDir:'asc'});};
     const load=async()=>{from=$('#cmpFrom').value||from;to=$('#cmpTo').value||to;if(from<AUDIT_BASELINE_DATE)from=AUDIT_BASELINE_DATE;if(from>to)return toast('From date is after To date','error');
       try{rows=await loadCompareRows(from,to);draw();}catch(e){fail(e,'Load failed');}};
-    $('#cmpGo').onclick=load;$('#cmpQ').oninput=draw;await load();
+    $('#cmpGo').onclick=load;$('#cmpQ').oninput=draw;$('#cmpOnly').onchange=draw;await load();
   },
   async variance(){
     const physical=state.branches.filter(b=>b.is_active!==false);
@@ -1177,6 +1177,21 @@ $('#modalClose').onclick=closeModal;modal.addEventListener('click',e=>{if(e.targ
 
 /* ---------- Quick search / command palette (Ctrl+K) and breadcrumbs ---------- */
 function crumbFor(page){let grp='';for(const [id,,label] of navItems){if(id==='__g'){grp=label;continue;}if(id===page)return grp;}return '';}
+
+async function paintHealth(){
+  try{
+    const {data,error}=await supabase.from('v_stock_integrity').select('*');
+    let el=$('#healthBar');
+    if(error||!data||!data.length){el?.remove();return;}
+    if(!el){el=document.createElement('div');el.id='healthBar';el.className='info-banner health-bar';content.parentNode.insertBefore(el,content);}
+    const items=new Set(data.map(r=>r.product_name)).size;
+    el.innerHTML=`<strong>⚠ Data check:</strong> ${qty(data.length)} stock rows (${qty(items)} products) do not match the movement history or expiry batches. <button class="btn small-btn" id="healthView">View</button>`;
+    $('#healthView').onclick=()=>{
+      openModal('Data check','Stock quantity compared with movement history and expiry batches (all three should be equal)',`<div id="healthTable"></div>`,'wide');
+      renderDataTable('#healthTable',data.map(r=>({...r,branch_name:locationName(r.branch_name)})),[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product'},{key:'branch_name',label:'Location'},{key:'stock_qty',label:'Stock',type:'qty',align:'right',noTotal:true},{key:'ledger_qty',label:'Movement History',type:'qty',align:'right',noTotal:true},{key:'batch_qty',label:'Expiry Batches',type:'qty',align:'right',noTotal:true},{key:'stock_vs_ledger',label:'Stock − History',type:'qty',align:'right'},{key:'stock_vs_batches',label:'Stock − Batches',type:'qty',align:'right'}],{filename:'joffreys-data-check',title:'Joffrey’s Bakery Data Check',pageSize:100});
+    };
+  }catch(e){}
+}
 function paintCrumb(page){const c=$('#crumb');if(!c)return;const meta=pageMeta[page]||['Inventory',''];const g=crumbFor(page);c.innerHTML=`<span>Joffrey’s</span>${g?`<i>›</i><span>${esc(g)}</span>`:''}<i>›</i><strong>${esc(meta[0])}</strong>`;}
 let paletteIdx=0,paletteItems=[];
 function paletteSources(q){

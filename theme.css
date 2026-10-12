@@ -113,3 +113,7 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#e3eeff!important}
 .doc-head{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 22px;padding:16px 18px;margin-bottom:12px}
 .doc-head div{display:grid;gap:3px;min-width:0}.doc-head span{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.doc-head strong{font-size:14px;overflow-wrap:anywhere}.doc-head .wide{grid-column:1/-1}
 @media(max-width:900px){.doc-head{grid-template-columns:repeat(2,minmax(0,1fr))}.doc-filter select,.doc-filter input{min-width:130px}}
+
+/* data-check banner */
+.health-bar{background:#fff4e5;border-color:#f0c27a;color:#7a4a00;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.health-bar .btn{margin-left:auto}
