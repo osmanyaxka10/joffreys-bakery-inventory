@@ -834,7 +834,7 @@ const pages = {
   async compare(){
     const to0=isoToday();let from='2026-10-01',to=to0;
     content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><button class="btn primary" id="cmpGo">Apply</button></div>
-    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0).</div><div id="cmpTable"></div>`;
+    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <span class="muted small">App version 20261012-7</span></div><div id="cmpTable"></div>`;
     let rows=[];
     const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No verified 30/09 count — closing taken as 0">*</span>':'')},
       {key:'closing',label:'Closing Stock',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},
