@@ -43,6 +43,7 @@ const navItems = [
   ['movements','≋','Movements'],
   ['variance','±','Variance'],
   ['compare','⇋','Compare Sheet'],
+  ['counts','✎','Closing Counts'],
   ['adjustments','±','Adjustments'],
   ['waste','♲','Waste'],
   ['expiry','◷','Expiry'],
@@ -66,6 +67,7 @@ const pageMeta = {
   reports:['Reports','Daily, monthly and management reporting'],
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
+  counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
   compare:['Compare Sheet','Closing stock, received, transferred and available — per item'],
   variance:['Variance','Counted stock against the system: over (+) and short (−) by product'],
   scan:['Scan Invoice','Read a supplier invoice photo and draft the receiving automatically'],
@@ -182,6 +184,7 @@ async function requireData(force=false){
   const values=results.map((r,i)=>safeResultRows(r,labels[i],warnings));
   state.products=values[0];state.allProducts=values[1];state.suppliers=values[2];state.branches=values[3].filter(x=>x.is_active);state.positions=values[4];state.expiry=values[5];
   state.warehouse=state.branches.find(x=>String(x.name).toLowerCase()==='warehouse')||null;
+  await loadClosingCounts();
   state.dataWarnings=warnings;
   if(warnings.length)console.warn('Some dashboard data sources could not be loaded:',warnings);
 }
@@ -374,7 +377,24 @@ const AUDIT_OPENING_STOCK={
   'ranch club':30,'caesar club':30,'3 cheese club':30,'lotus pudding':5,'kunafa pudding':5,'cookies pudding':5,'chocolate pudding':5,
   'ice cream chocolate':15
 };
+async function loadClosingCounts(){
+  state.closing={};state.closingByName=null;
+  try{
+    const {data,error}=await supabase.from('closing_counts').select('branch_id,product_id,quantity').eq('count_date',AUDIT_BASELINE_DATE).limit(5000);
+    if(error)throw error;
+    for(const r of data||[]){(state.closing[r.branch_id]||(state.closing[r.branch_id]={}))[r.product_id]=Number(r.quantity);}
+    const wh=state.warehouse?.id;const names=new Map((state.allProducts||[]).map(p=>[Number(p.id),p.name]));
+    if(wh&&state.closing[wh]){state.closingByName={};for(const [pid,q] of Object.entries(state.closing[wh])){const n=names.get(Number(pid));if(n)state.closingByName[String(n).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()]=q;}}
+  }catch(e){console.warn('Closing counts not loaded',e);}
+}
+function closingFor(branchId,productId,productName){
+  const b=state.closing?.[branchId];
+  if(b&&Object.prototype.hasOwnProperty.call(b,productId))return b[productId];
+  if(b&&Object.keys(b).length)return null;           // this location has counts, this product was not counted
+  return branchId===state.warehouse?.id?auditBaseline(productName):null;
+}
 function auditBaseline(productName){
+  if(state.closingByName){const k=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();if(Object.prototype.hasOwnProperty.call(state.closingByName,k))return state.closingByName[k];}
   const key=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
   if(Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,key))return AUDIT_OPENING_STOCK[key];
   const aliases={'turkey and cheese baguette':'turkey cheese baguette','three cheese club':'3 cheese club','blueberry cheesecake':'blueberry cheese cake','lotus cheesecake':'lotus cheese cake','3 cheese club sandwich':'3 cheese club','caesar chicken club sandwich':'caesar club','chicken ranch club sandwich':'ranch club','chicken fajita sandwich small':'fajita small','chicken fajita wrap':'fajita wrap','halloumi sandwich small':'halloumi small','tuna sandwich small':'tuna small','turkey cheese sandwich small':'turkey cheese small'};
@@ -405,57 +425,57 @@ async function loadAuditDifferenceRows(toDate=isoToday()){
   }).sort((a,b)=>a.product_name.localeCompare(b.product_name));
 }
 
-async function loadCompareRows(from,to){
+const countsState={branch:null};
+async function loadCompareRows(from,to,branchId=1){
   const base=AUDIT_BASELINE_DATE;
   const [rr,tr,wr,ar]=await Promise.all([
-    supabase.from('v_daily_receiving_report').select('date,product_id,product_code,product_name,quantity').eq('branch_id',1).gte('date',base).lte('date',to).limit(20000),
-    supabase.from('v_daily_transfer_report').select('date,from_branch_id,to_branch_id,product_id,product_code,product_name,quantity').or('from_branch_id.eq.1,to_branch_id.eq.1').gte('date',base).lte('date',to).limit(20000),
-    supabase.from('waste').select('waste_date,product_id,quantity').eq('branch_id',1).eq('status','COMPLETED').gte('waste_date',base).lte('waste_date',to).limit(20000),
-    supabase.from('adjustments').select('adjustment_date,product_id,quantity_change').eq('branch_id',1).gte('adjustment_date',base).lte('adjustment_date',to).limit(20000)
+    supabase.from('v_daily_receiving_report').select('date,product_id,product_code,product_name,quantity').eq('branch_id',branchId).gte('date',base).lte('date',to).limit(20000),
+    supabase.from('v_daily_transfer_report').select('date,from_branch_id,to_branch_id,product_id,product_code,product_name,quantity').or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`).gte('date',base).lte('date',to).limit(20000),
+    supabase.from('waste').select('waste_date,product_id,quantity').eq('branch_id',branchId).eq('status','COMPLETED').gte('waste_date',base).lte('waste_date',to).limit(20000),
+    supabase.from('adjustments').select('adjustment_date,product_id,quantity_change').eq('branch_id',branchId).gte('adjustment_date',base).lte('adjustment_date',to).limit(20000)
   ]);
   for(const r of [rr,tr,wr,ar])if(r.error)throw r.error;
   const m=new Map();
-  const get=(id,name,code)=>{id=Number(id);if(!m.has(id))m.set(id,{product_id:id,product_name:name||'Unknown',product_code:code||'—',pre:0,received:0,transferred:0,waste:0,adjustments:0});const p=m.get(id);if(name&&p.product_name==='Unknown')p.product_name=name;if(code&&p.product_code==='—')p.product_code=code;return p;};
-  const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
-  for(const p of wh)get(p.product_id,p.product_name,p.product_code);
-  // add(p,field,d,v): before From it moves the opening, otherwise it is a period movement
+  const get=(id,name,code)=>{id=Number(id);if(!m.has(id))m.set(id,{product_id:id,branch_id:branchId,product_name:name||'Unknown',product_code:code||'—',pre:0,received:0,transferred:0,waste:0,adjustments:0});const p=m.get(id);if(name&&p.product_name==='Unknown')p.product_name=name;if(code&&p.product_code==='—')p.product_code=code;return p;};
+  const here=state.positions.filter(x=>Number(x.branch_id)===Number(branchId));
+  for(const p of here)get(p.product_id,p.product_name,p.product_code);
+  // before From a movement shifts the opening, otherwise it is a period movement
   const add=(p,f,d,v)=>{if(String(d).slice(0,10)<from)p.pre+=(f==='received'||f==='adjustments'?v:-v);else p[f]+=v;};
   for(const r of rr.data||[])add(get(r.product_id,r.product_name,r.product_code),'received',r.date,Number(r.quantity||0));
   for(const r of tr.data||[]){const p=get(r.product_id,r.product_name,r.product_code),q=Number(r.quantity||0);
-    if(Number(r.from_branch_id)===1)add(p,'transferred',r.date,q);
-    if(Number(r.to_branch_id)===1)add(p,'transferred',r.date,-q);}
+    if(Number(r.from_branch_id)===Number(branchId))add(p,'transferred',r.date,q);
+    if(Number(r.to_branch_id)===Number(branchId))add(p,'received',r.date,q);}
   for(const r of wr.data||[])if(m.has(Number(r.product_id)))add(m.get(Number(r.product_id)),'waste',r.waste_date,Number(r.quantity||0));
   for(const r of ar.data||[])if(m.has(Number(r.product_id)))add(m.get(Number(r.product_id)),'adjustments',r.adjustment_date,Number(r.quantity_change||0));
   return [...m.values()].map(p=>{
-    const b=auditBaseline(p.product_name);
+    const b=closingFor(Number(branchId),p.product_id,p.product_name);
     const closing=(b===null?0:b)+p.pre;
     const available=closing+p.received-p.transferred-p.waste+p.adjustments;
-    const system=Number(wh.find(x=>Number(x.product_id)===p.product_id)?.available_quantity||0);
+    const system=Number(here.find(x=>Number(x.product_id)===p.product_id)?.available_quantity||0);
     return {...p,closing,available,system,diff:system-available,nobase:b===null};
   }).filter(r=>r.closing||r.received||r.transferred||r.waste||r.adjustments||r.system).sort((a,b)=>a.product_name.localeCompare(b.product_name));
 }
-
 async function showProductHistory(r){
-  openModal(`${r.product_name} — history`,`Bakery Warehouse · ${r.product_code||''}`,`<div class="panel loading">Loading history…</div>`,'wide');
+  const BR=Number(r.branch_id||1);openModal(`${r.product_name} — history`,`${locationName((state.branches.find(x=>Number(x.id)===BR)||{}).name||'')} · ${r.product_code||''}`,`<div class="panel loading">Loading history…</div>`,'wide');
   try{
     const id=r.product_id,base=AUDIT_BASELINE_DATE;
     const [rr,tr,wr,ar]=await Promise.all([
-      supabase.from('v_daily_receiving_report').select('date,reference_no,invoice_no,quantity,created_at').eq('branch_id',1).eq('product_id',id).gte('date',base).limit(5000),
-      supabase.from('v_daily_transfer_report').select('date,reference_no,from_branch_id,to_branch_id,quantity,created_at').eq('product_id',id).or('from_branch_id.eq.1,to_branch_id.eq.1').gte('date',base).limit(5000),
-      supabase.from('waste').select('waste_date,quantity,created_at').eq('branch_id',1).eq('product_id',id).eq('status','COMPLETED').gte('waste_date',base).limit(5000),
-      supabase.from('adjustments').select('adjustment_date,quantity_change,created_at').eq('branch_id',1).eq('product_id',id).gte('adjustment_date',base).limit(5000)
+      supabase.from('v_daily_receiving_report').select('date,reference_no,invoice_no,quantity,created_at').eq('branch_id',BR).eq('product_id',id).gte('date',base).limit(5000),
+      supabase.from('v_daily_transfer_report').select('date,reference_no,from_branch_id,to_branch_id,quantity,created_at').eq('product_id',id).or(`from_branch_id.eq.${BR},to_branch_id.eq.${BR}`).gte('date',base).limit(5000),
+      supabase.from('waste').select('waste_date,quantity,created_at').eq('branch_id',BR).eq('product_id',id).eq('status','COMPLETED').gte('waste_date',base).limit(5000),
+      supabase.from('adjustments').select('adjustment_date,quantity_change,created_at').eq('branch_id',BR).eq('product_id',id).gte('adjustment_date',base).limit(5000)
     ]);
     for(const x of [rr,tr,wr,ar])if(x.error)throw x.error;
-    const ev=[];const b=auditBaseline(r.product_name);
+    const ev=[];const b=closingFor(BR,id,r.product_name);
     ev.push({date:base,ord:0,type:'Closing 30/09',ref:'',delta:b===null?0:b});
     for(const x of rr.data||[])ev.push({date:String(x.date).slice(0,10),ord:1,type:'Received',ref:x.invoice_no||x.reference_no||'',delta:Number(x.quantity||0),at:x.created_at});
-    for(const x of tr.data||[]){const out=Number(x.from_branch_id)===1;ev.push({date:String(x.date).slice(0,10),ord:2,type:out?'Transferred out':'Transferred in',ref:x.reference_no||'',delta:out?-Number(x.quantity||0):Number(x.quantity||0),at:x.created_at});}
+    for(const x of tr.data||[]){const out=Number(x.from_branch_id)===BR;ev.push({date:String(x.date).slice(0,10),ord:2,type:out?'Transferred out':'Transferred in',ref:x.reference_no||'',delta:out?-Number(x.quantity||0):Number(x.quantity||0),at:x.created_at});}
     for(const x of wr.data||[])ev.push({date:String(x.waste_date).slice(0,10),ord:3,type:'Waste',ref:'',delta:-Number(x.quantity||0),at:x.created_at});
     for(const x of ar.data||[])ev.push({date:String(x.adjustment_date).slice(0,10),ord:4,type:'Adjustment',ref:'',delta:Number(x.quantity_change||0),at:x.created_at});
     ev.sort((a,c)=>a.date.localeCompare(c.date)||a.ord-c.ord||String(a.at||'').localeCompare(String(c.at||'')));
     let bal=0;const rows=ev.map((e,i)=>{bal+=e.delta;return {n:i+1,date:e.date,type:e.type,ref:e.ref,in_qty:e.delta>0?e.delta:0,out_qty:e.delta<0?-e.delta:0,balance:bal};});
-    const sys=Number(state.positions.find(x=>x.branch_name==='Warehouse'&&Number(x.product_id)===Number(id))?.available_quantity||0);
-    modalBody.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Calculated stock',qty(bal),'Closing + received − transferred − waste ± adjustments')}${kpi('System stock',qty(sys),'Current Warehouse stock')}${kpi('Difference',(sys-bal>0?'+':'')+qty(sys-bal),Math.abs(sys-bal)<0.00001?'Matches':'Needs review')}</div><div id="phTable"></div>`;
+    const sys=Number(state.positions.find(x=>Number(x.branch_id)===BR&&Number(x.product_id)===Number(id))?.available_quantity||0);
+    modalBody.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Calculated stock',qty(bal),'Closing + received − transferred − waste ± adjustments')}${kpi('System stock',qty(sys),'Current system stock')}${kpi('Difference',(sys-bal>0?'+':'')+qty(sys-bal),Math.abs(sys-bal)<0.00001?'Matches':'Needs review')}</div><div id="phTable"></div>`;
     renderDataTable('#phTable',rows,[{key:'n',label:'#',align:'right',noTotal:true},{key:'date',label:'Date',type:'date'},{key:'type',label:'Type'},{key:'ref',label:'Reference'},{key:'in_qty',label:'In',type:'qty',align:'right'},{key:'out_qty',label:'Out',type:'qty',align:'right'},{key:'balance',label:'Balance',type:'qty',align:'right',noTotal:true}],{filename:`joffreys-history-${r.product_code||id}`,title:`${r.product_name} history`,pageSize:200,sortKey:'n',sortDir:'asc'});
   }catch(e){modalBody.innerHTML=`<div class="panel empty">History could not load: ${esc(e?.message||String(e))}</div>`;}
 }
@@ -859,18 +879,49 @@ const pages = {
 
   async compare(){
     const to0=isoToday();let from='2026-10-01',to=to0;
-    content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><label class="small"><span>Show</span><select id="cmpOnly"><option value="all">All items</option><option value="diff">Differences only</option></select></label><button class="btn primary" id="cmpGo">Apply</button></div>
-    <div class="info-banner">Bakery Warehouse. <b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <b>Tap an item</b> to see its full history. <span class="muted small">App version 20261012-10</span></div><div id="cmpTable"></div>`;
+    const locs=(state.branches||[]).filter(b=>b.is_active!==false);
+    const whId=state.warehouse?.id||locs[0]?.id;
+    content.innerHTML=`<div class="doc-filter" id="cmpFilter"><label>Location<select id="cmpLoc">${locs.map(b=>`<option value="${b.id}" ${Number(b.id)===Number(whId)?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label><label>From<input type="date" id="cmpFrom" value="${from}" min="${AUDIT_BASELINE_DATE}"></label><label>To<input type="date" id="cmpTo" value="${to}"></label><label>Find product<input id="cmpQ" type="search" placeholder="Name or SKU"></label><label class="small"><span>Show</span><select id="cmpOnly"><option value="all">All items</option><option value="diff">Differences only</option></select></label><button class="btn primary" id="cmpGo">Apply</button></div>
+    <div class="info-banner"><b>Closing</b> = verified 30/09 count plus everything before the From date. <b>Available</b> = Closing + Received − Transferred − Waste ± Adjustments. <b>Difference</b> = system stock − Available (should be 0). <b>Tap an item</b> to see its full history. <span class="muted small">App version 20261012-11</span></div><div id="cmpNote"></div><div id="cmpTable"></div>`;
     let rows=[];
-    const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No verified 30/09 count — closing taken as 0">*</span>':'')},
+    const cols=[{key:'product_code',label:'SKU'},{key:'product_name',label:'Product',render:(v,r)=>esc(v)+(r.nobase?' <span class="muted small" title="No 30/09 count entered — closing taken as 0">*</span>':'')},
       {key:'closing',label:'Closing Stock',type:'qty',align:'right'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},
       {key:'waste',label:'Waste',type:'qty',align:'right'},{key:'adjustments',label:'Adjust.',type:'qty',align:'right'},{key:'available',label:'Available Stock',type:'qty',align:'right'},
       {key:'system',label:'System Stock',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right',render:v=>Math.abs(v)>0.00001?`<b class="audit-variance">${v>0?'+':''}${qty(v)}</b>`:'0'}];
     const draw=()=>{const q=$('#cmpQ').value.trim().toLowerCase();const only=$('#cmpOnly').value==='diff';const f=rows.filter(r=>(!q||`${r.product_name} ${r.product_code}`.toLowerCase().includes(q))&&(!only||Math.abs(r.diff)>0.00001));
-      renderDataTable('#cmpTable',f,cols,{filename:'joffreys-compare-sheet',title:`Joffrey’s Bakery Compare Sheet ${dateFmt(from)} – ${dateFmt(to)}`,pageSize:200,sortKey:'product_name',sortDir:'asc',rowKey:'product_id',onRow:showProductHistory});};
+      const locName=locationName((locs.find(b=>String(b.id)===$('#cmpLoc').value)||{}).name||'');
+      renderDataTable('#cmpTable',f,cols,{filename:`joffreys-compare-${locName}`.replace(/\s+/g,'-'),title:`Joffrey’s Bakery Compare Sheet · ${locName} · ${dateFmt(from)} – ${dateFmt(to)}`,pageSize:200,sortKey:'product_name',sortDir:'asc',rowKey:'product_id',onRow:showProductHistory});};
     const load=async()=>{from=$('#cmpFrom').value||from;to=$('#cmpTo').value||to;if(from<AUDIT_BASELINE_DATE)from=AUDIT_BASELINE_DATE;if(from>to)return toast('From date is after To date','error');
-      try{rows=await loadCompareRows(from,to);draw();}catch(e){fail(e,'Load failed');}};
-    $('#cmpGo').onclick=load;$('#cmpQ').oninput=draw;$('#cmpOnly').onchange=draw;await load();
+      const br=Number($('#cmpLoc').value);
+      const has=state.closing&&state.closing[br]&&Object.keys(state.closing[br]).length;
+      $('#cmpNote').innerHTML=has||br===state.warehouse?.id?'':`<div class="info-banner health-bar"><strong>No 30/09 closing count for this location yet.</strong> Closing is shown as 0. <button class="btn small-btn" id="cmpEnter">Enter counts</button></div>`;
+      $('#cmpEnter')&&($('#cmpEnter').onclick=()=>{countsState.branch=br;go('counts');});
+      try{rows=await loadCompareRows(from,to,br);draw();}catch(e){fail(e,'Load failed');}};
+    $('#cmpGo').onclick=load;$('#cmpLoc').onchange=load;$('#cmpQ').oninput=draw;$('#cmpOnly').onchange=draw;await load();
+  },
+  async counts(){
+    const locs=(state.branches||[]).filter(b=>b.is_active!==false);
+    const canEdit=activeRole()==='admin';
+    if(!countsState.branch)countsState.branch=Number(state.warehouse?.id||locs[0]?.id);
+    content.innerHTML=`<div class="doc-filter"><label>Location<select id="ccLoc">${locs.map(b=>`<option value="${b.id}" ${Number(b.id)===Number(countsState.branch)?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label><label>Count date<input value="${esc(dateFmt(AUDIT_BASELINE_DATE))}" disabled></label><label>Find product<input id="ccQ" type="search" placeholder="Name or SKU"></label><button class="btn primary" id="ccSave" ${canEdit?'':'disabled'}>Save counts</button></div>
+    <div class="info-banner">The closing stock you counted on 30/09/2026. The Compare Sheet starts from these numbers. Leave a box empty if the item was not counted.${canEdit?'':' Only an admin can change counts.'}</div><div id="ccTable" class="table-card"></div>`;
+    const pend={};
+    const draw=()=>{
+      const br=Number($('#ccLoc').value);countsState.branch=br;const q=$('#ccQ').value.trim().toLowerCase();const cur={...(state.closing?.[br]||{}),...(pend[br]||{})};
+      const prods=(state.products||[]).filter(p=>!q||`${p.name} ${p.product_code}`.toLowerCase().includes(q)).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+      $('#ccTable').innerHTML=`<div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Product</th><th class="num">Closing count 30/09</th></tr></thead><tbody>${prods.map(p=>`<tr><td>${esc(p.product_code||'')}</td><td>${esc(p.name)}</td><td class="num"><input type="number" min="0" step="1" inputmode="decimal" data-cc="${p.id}" value="${Object.prototype.hasOwnProperty.call(cur,p.id)?cur[p.id]:''}" style="width:96px;text-align:right" ${canEdit?'':'disabled'}></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No products</td></tr>'}</tbody></table></div>`;
+      $$('#ccTable input[data-cc]').forEach(i=>i.oninput=()=>{(pend[br]||(pend[br]={}))[i.dataset.cc]=i.value===''?undefined:Number(i.value);});
+    };
+    $('#ccLoc').onchange=draw;$('#ccQ').oninput=draw;
+    const collect=()=>{const br=Number($('#ccLoc').value);return Object.entries(pend[br]||{}).filter(([,v])=>v!==undefined&&!Number.isNaN(v)).map(([k,v])=>({product_id:Number(k),quantity:v}));};
+    $('#ccSave').onclick=async()=>{
+      const br=Number($('#ccLoc').value);const items=collect();if(!items.length)return toast('No changes to save','error');
+      $('#ccSave').disabled=true;
+      try{const {error}=await supabase.rpc('set_closing_counts',{p_count_date:AUDIT_BASELINE_DATE,p_branch_id:br,p_items:items});if(error)throw error;
+        await loadClosingCounts();pend[br]={};toast(`Saved ${items.length} counts`,'success');draw();}
+      catch(e){fail(e,'Save failed');}finally{$('#ccSave').disabled=false;}
+    };
+    draw();
   },
   async variance(){
     const physical=state.branches.filter(b=>b.is_active!==false);
