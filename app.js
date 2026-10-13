@@ -181,7 +181,7 @@ async function requireData(force=false){
   const warnings=[];
   const labels=['Active products','All products','Suppliers','Branches','Stock positions','Expiry alerts'];
   const values=results.map((r,i)=>safeResultRows(r,labels[i],warnings));
-  state.products=values[0];state.allProducts=values[1];state.suppliers=values[2];state.branches=values[3].filter(x=>x.is_active);state.positions=values[4];state.expiry=values[5];
+  state.products=values[0];state.allProducts=values[1];state.suppliers=values[2];state.branches=values[3].filter(x=>x.is_active);state.positions=values[4];state.expiry=(values[5]||[]).filter(x=>Number(x.branch_id)===1);
   state.warehouse=state.branches.find(x=>String(x.name).toLowerCase()==='warehouse')||null;
   await loadClosingCounts();
   state.dataWarnings=warnings;
