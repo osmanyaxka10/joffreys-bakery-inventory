@@ -35,7 +35,6 @@ const navItems = [
   ['dashboard','▦','Dashboard'],
   ['__g','','Operations'],
   ['receiving','↓','Receiving'],
-  ['scan','⎙','Scan Invoice'],
   ['transfers','⇄','Transfers'],
   ['replenishment','⚡','Replenishment'],
   ['__g','','Inventory'],
@@ -1340,7 +1339,7 @@ let paletteIdx=0,paletteItems=[];
 function paletteSources(q){
   q=(q||'').trim().toLowerCase();const out=[];
   for(const [id,ico,label] of navItems){if(id==='__g')continue;if(!q||label.toLowerCase().includes(q))out.push({kind:'Page',label,hint:crumbFor(id),ico,run:()=>go(id)});}
-  const acts=[['New receiving','receiving','Receiving'],['New transfer','transfers','Transfers'],['Record waste','waste','Waste'],['Stock adjustment','adjustments','Adjustments'],['Count variance (Warehouse)','variance','Variance'],['Scan an invoice','scan','Operations']];
+  const acts=[['New receiving','receiving','Receiving'],['New transfer','transfers','Transfers'],['Record waste','waste','Waste'],['Stock adjustment','adjustments','Adjustments'],['Count variance (Warehouse)','variance','Variance']];
   for(const [label,id,hint] of acts){if(q&&label.toLowerCase().includes(q)&&!out.some(o=>o.label===label))out.push({kind:'Action',label,hint,ico:'＋',run:()=>go(id)});}
   if(q.length>=2){const m=new Map();for(const r of state.positions||[]){const k=r.product_id;if(!m.has(k))m.set(k,{name:r.product_name,code:r.product_code,qty:0});m.get(k).qty+=Number(r.available_quantity||0);}
     let n=0;for(const p of m.values()){if(`${p.name} ${p.code}`.toLowerCase().includes(q)){out.push({kind:'Product',label:p.name,hint:`${p.code||''} · ${qty(p.qty)} in stock`,ico:'□',run:async()=>{await go('stock');const si=document.querySelector('#content [data-search]');if(si){si.value=p.name;si.dispatchEvent(new Event('input'));}}});if(++n>=12)break;}}}
