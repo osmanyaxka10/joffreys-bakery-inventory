@@ -143,3 +143,4 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#e3eeff!important}
 .next-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px}
 .next-row{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:13px}
 .next-row span{flex:1}.next-row i{font-style:normal;color:var(--muted,#6b7280);font-size:12px}
+.next-row.zero{background:#fff1f0;border-color:#f5b5ae}.next-row.zero i{color:#b42318}
