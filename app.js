@@ -36,6 +36,7 @@ const navItems = [
   ['__g','','Operations'],
   ['receiving','↓','Receiving'],
   ['transfers','⇄','Transfers'],
+  ['sheet','▤','Transfer Sheet'],
   ['replenishment','⚡','Replenishment'],
   ['__g','','Inventory'],
   ['stock','▤','Stock'],
@@ -67,6 +68,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  sheet:['Transfer Sheet','Type the daily sheet quantities — checked against Warehouse stock'],
   compare:['Compare Sheet','Closing stock, received, transferred and available — per item'],
   variance:['Variance','Counted stock against the system: over (+) and short (−) by product'],
   scan:['Scan Invoice','Read a supplier invoice photo and draft the receiving automatically'],
@@ -899,6 +901,43 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async sheet(){
+    const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===Number(state.warehouse?.id)).map(x=>({id:Number(x.product_id),name:x.product_name,code:x.product_code,stock:Number(x.available_quantity||0)})).sort((a,b)=>a.name.localeCompare(b.name));
+    const dests=(state.branches||[]).filter(b=>Number(b.id)!==Number(state.warehouse?.id));
+    const jed=dests.find(b=>/jeddah/i.test(b.name)&&!/airport|shs/i.test(b.name))||dests[0];
+    const d0=isoToday(),ymd=d0.replace(/-/g,'');
+    content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
+      <label>Date<input type="date" id="shDate" value="${esc(d0)}"></label>
+      <label>To<select id="shTo">${dests.map(b=>`<option value="${b.id}" ${jed&&b.id===jed.id?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label>
+      <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
+      <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
+      <div class="sheet-list" id="shList">${wh.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join('')}</div>
+      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
+    const rows=()=>$$('.sh-row',content);
+    const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
+    const sum=()=>{const l=read();let bad=0;rows().forEach(r=>{const q=Number(r.querySelector('.sh-qty').value||0),over=q>Number(r.dataset.stock);r.classList.toggle('over',over);});l.forEach(x=>{if(x.q>x.stock)bad++;});$('#shSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs${bad?` · <b class="sh-bad">${bad} over stock</b>`:''}`;return bad;};
+    content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty'))sum();});
+    const setRef=async()=>{const dt=$('#shDate').value,base='TR-'+dt.replace(/-/g,'')+'-';$('#shRef').value=base+'01';try{const {data}=await supabase.from('transfers').select('reference_no').like('reference_no',base+'%');const used=(data||[]).map(r=>Number(String(r.reference_no).slice(base.length))).filter(Number.isFinite);const n=(used.length?Math.max(...used):0)+1;$('#shRef').value=base+String(n).padStart(2,'0');}catch{}};
+    $('#shDate').onchange=setRef;setRef();
+    $('#shFind').oninput=()=>{const q=$('#shFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
+    $('#shSave').onclick=async()=>{
+      const btn=$('#shSave');const l=read();
+      if(!l.length)return toast('Enter at least one quantity','error');
+      if(sum())return toast('Some lines are above Warehouse stock — fix the red rows','error');
+      const date=$('#shDate').value,ref=$('#shRef').value.trim();if(!date||!ref)return toast('Date and reference are required','error');
+      if(!confirm(`Record transfer ${ref}\n${date} · ${l.length} lines · ${l.reduce((a,x)=>a+x.q,0)} pcs\nWarehouse → ${$('#shTo').selectedOptions[0].textContent}`))return;
+      try{assertOnline();}catch(e){return fail(e,'Could not save');}
+      btn.disabled=true;btn.textContent='Saving…';
+      try{
+        const {data,error}=await supabase.rpc('post_transfer',{p_transfer_date:date,p_reference_no:ref,p_to_branch_id:Number($('#shTo').value),p_items:l.map(x=>({product_id:x.id,quantity:x.q,notes:null})),p_notes:`Transfer ${dateFmt(date)} - Warehouse to ${locationName($('#shTo').selectedOptions[0].textContent)}`,p_posting_key:newPostingKey()});
+        if(error)throw error;
+        toast(`Transfer ${data?.reference_no||ref} saved`,'success');
+        try{await requireData(true);}catch(e){console.error(e);}
+        go('transfers',true);
+      }catch(e){fail(e,'Could not save');btn.disabled=false;btn.textContent='Record transfer';}
+    };
+  },
+
 
   async adjustments(){
     const {data,error}=await supabase.from('v_adjustment_report').select('*').order('created_at',{ascending:false}).limit(3000);if(error)throw error;
