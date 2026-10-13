@@ -680,6 +680,23 @@ function dayColumns(kind){
     {key:'parties',label:isR?'Supplier(s)':'From'}
   ];
 }
+async function paintNextTransfer(){
+  const host=document.createElement('div');host.className='panel next-xfer';host.id='nextXfer';
+  const bar=$('#docBody');if(!bar)return;bar.before(host);
+  try{
+    const {data:last,error:e1}=await supabase.from('v_daily_receiving_report').select('date').eq('branch_id',1).order('date',{ascending:false}).limit(1);
+    if(e1)throw e1;const d=last?.[0]?.date;
+    if(!d){host.remove();return;}
+    const {data:rows,error:e2}=await supabase.from('v_daily_receiving_report').select('product_id,product_name,quantity').eq('branch_id',1).eq('date',d).limit(2000);
+    if(e2)throw e2;
+    const by=new Map();(rows||[]).forEach(r=>{const o=by.get(r.product_id)||{name:r.product_name,qty:0};o.qty+=Number(r.quantity)||0;by.set(r.product_id,o);});
+    const wh=new Map((state.positions||[]).filter(p=>Number(p.branch_id)===1).map(p=>[Number(p.product_id),Number(p.quantity??p.stock??0)]));
+    const list=[...by.entries()].map(([id,o])=>({name:o.name,recv:o.qty,stock:wh.get(Number(id))??0})).sort((a,b)=>a.name.localeCompare(b.name));
+    host.innerHTML=`<div class="next-head"><strong>Ready to transfer next</strong><span>Received ${esc(dateFmt(d))} · ${list.length} items · ${qty(list.reduce((a,x)=>a+x.recv,0))} pcs</span><button class="doc-bar-btn" id="nxPrint">Print</button></div>
+    <div class="next-grid">${list.map(x=>`<div class="next-row"><span>${esc(x.name)}</span><b>${qty(x.recv)}</b><i title="Warehouse stock now">${qty(x.stock)} in stock</i></div>`).join('')}</div>`;
+    $('#nxPrint').onclick=()=>printRows(list,[{key:'name',label:'Item'},{key:'recv',label:'Received'},{key:'stock',label:'Warehouse stock'}],`Ready to transfer — received ${dateFmt(d)}`);
+  }catch(e){host.remove();}
+}
 function docsPage(kind){
   const st=docState[kind],isR=kind==='receiving',title=isR?'Receiving':'Transfers';
   const range=()=>st.preset==='custom'?{from:st.from,to:st.to}:periodRange(st.preset);
@@ -689,6 +706,7 @@ function docsPage(kind){
   content.innerHTML=`<div class="page-actions"><button class="btn primary" id="docNew" ${canPost()?'':'disabled'}>${isR?'＋ New Receiving':'⇄ New Transfer'}</button></div>
   <div id="docBody"></div>`;
   $('#docNew').onclick=isR?openReceiving:openTransfer;
+  if(!isR)paintNextTransfer();
   const body=$('#docBody');
   body.innerHTML=`<div class="doc-bar"><span class="doc-bar-title">${title} by Date</span><button class="doc-bar-btn" id="docHide">Hide Filter</button><button class="doc-bar-btn" id="docRefresh">Refresh</button><button class="doc-bar-btn" id="docXls">Export to Excel</button><button class="doc-bar-btn" id="docPrintList">Print List</button></div>
   <div class="doc-filter" id="docFilter">
