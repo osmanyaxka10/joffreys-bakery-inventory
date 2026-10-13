@@ -691,8 +691,9 @@ async function paintNextTransfer(){
     const by=new Map();(rows||[]).forEach(r=>{const o=by.get(r.product_id)||{name:r.product_name,qty:0};o.qty+=Number(r.quantity)||0;by.set(r.product_id,o);});
     const wh=new Map((state.positions||[]).filter(p=>Number(p.branch_id)===1).map(p=>[Number(p.product_id),Number(p.quantity??p.stock??0)]));
     const list=[...by.entries()].map(([id,o])=>({name:o.name,recv:o.qty,stock:wh.get(Number(id))??0})).sort((a,b)=>a.name.localeCompare(b.name));
-    host.innerHTML=`<div class="next-head"><strong>Ready to transfer next</strong><span>Received ${esc(dateFmt(d))} · ${list.length} items · ${qty(list.reduce((a,x)=>a+x.recv,0))} pcs</span><button class="doc-bar-btn" id="nxPrint">Print</button></div>
+    host.innerHTML=`<div class="next-head"><strong>Ready to transfer next</strong><span>Received ${esc(dateFmt(d))} · ${list.length} items · ${qty(list.reduce((a,x)=>a+x.recv,0))} pcs</span><button class="doc-bar-btn" id="nxCopy">Copy</button><button class="doc-bar-btn" id="nxPrint">Print</button></div>
     <div class="next-grid">${list.map(x=>`<div class="next-row"><span>${esc(x.name)}</span><b>${qty(x.recv)}</b><i title="Warehouse stock now">${qty(x.stock)} in stock</i></div>`).join('')}</div>`;
+    $('#nxCopy').onclick=async()=>{const t=`Received ${dateFmt(d)}\n`+list.map(x=>`${x.name}: ${qty(x.recv)}`).join('\n');try{await navigator.clipboard.writeText(t);toast('Copied');}catch{toast('Copy not allowed on this device','error');}};
     $('#nxPrint').onclick=()=>printRows(list,[{key:'name',label:'Item'},{key:'recv',label:'Received'},{key:'stock',label:'Warehouse stock'}],`Ready to transfer — received ${dateFmt(d)}`);
   }catch(e){host.remove();}
 }
