@@ -395,8 +395,14 @@ function closingFor(branchId,productId,productName){
   return branchId===state.warehouse?.id?auditBaseline(productName):null;
 }
 function auditBaseline(productName){
-  if(state.closingByName){const k=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();if(Object.prototype.hasOwnProperty.call(state.closingByName,k))return state.closingByName[k];}
   const key=String(productName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  // Once verified closing counts exist in Supabase, they are the source of truth.
+  // Never silently substitute an older hardcoded value for a product not counted.
+  if(state.closingByName){
+    if(Object.prototype.hasOwnProperty.call(state.closingByName,key))return state.closingByName[key];
+    return null;
+  }
+  // Legacy fallback is used only when no persisted closing-count set is available.
   if(Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,key))return AUDIT_OPENING_STOCK[key];
   const aliases={'turkey and cheese baguette':'turkey cheese baguette','three cheese club':'3 cheese club','blueberry cheesecake':'blueberry cheese cake','lotus cheesecake':'lotus cheese cake','3 cheese club sandwich':'3 cheese club','caesar chicken club sandwich':'caesar club','chicken ranch club sandwich':'ranch club','chicken fajita sandwich small':'fajita small','chicken fajita wrap':'fajita wrap','halloumi sandwich small':'halloumi small','tuna sandwich small':'tuna small','turkey cheese sandwich small':'turkey cheese small'};
   const alias=aliases[key];return alias&&Object.prototype.hasOwnProperty.call(AUDIT_OPENING_STOCK,alias)?AUDIT_OPENING_STOCK[alias]:null;
