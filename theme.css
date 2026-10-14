@@ -169,3 +169,4 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 .mo-legend{display:flex;gap:16px;margin:8px 0;font-size:13px}.mo-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 .mo-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:8px}
 .mo-lists h4{margin:0 0 6px}.mo-li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,#e8ebf0);font-size:14px}
+.mo-mode{display:flex;gap:8px;margin:10px 0 0}
