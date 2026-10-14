@@ -35,6 +35,7 @@ const navItems = [
   ['dashboard','▦','Dashboard'],
   ['__g','','Operations'],
   ['receiving','↓','Receiving'],
+  ['recvsheet','▤','Receiving Sheet'],
   ['transfers','⇄','Transfers'],
   ['sheet','▤','Transfer Sheet'],
   ['replenishment','⚡','Replenishment'],
@@ -68,6 +69,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  recvsheet:['Receiving Sheet','Type the invoice quantities — expiry and cost per line'],
   sheet:['Transfer Sheet','Type the daily sheet quantities — checked against Warehouse stock'],
   compare:['Compare Sheet','Closing stock, received, transferred and available — per item'],
   variance:['Variance','Counted stock against the system: over (+) and short (−) by product'],
@@ -908,6 +910,50 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async recvsheet(){
+    const sups=(state.suppliers||[]).filter(x=>x.is_active!==false);
+    const dev=sups.find(x=>/devon/i.test(x.name))||sups[0];
+    const d0=isoToday();
+    const addDays=(iso,n)=>{const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+    content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
+      <label>Date<input type="date" id="rsDate" value="${esc(d0)}" max="${esc(d0)}"></label>
+      <label>Supplier<select id="rsSup">${sups.map(x=>`<option value="${x.id}" ${dev&&x.id===dev.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <label>Invoice / Reference No<input id="rsRef" placeholder="e.g. 114700" autocomplete="off"></label>
+      <label class="sh-search">Find<input id="rsFind" placeholder="Search item" autocomplete="off"></label></div>
+      <div class="sheet-list" id="rsList"></div>
+      <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
+    const paint=()=>{
+      const sid=Number($('#rsSup').value),date=$('#rsDate').value||d0;
+      const list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid).sort((a,b)=>String(a.name).localeCompare(b.name));
+      $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
+      sum();
+    };
+    const rows=()=>$$('.rs-row',content);
+    const read=()=>rows().map(r=>({id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,q:Number(r.querySelector('.sh-qty').value||0),cost:Number(r.querySelector('.rs-cost').value||0),exp:r.querySelector('.rs-exp').value})).filter(x=>x.q>0);
+    const sum=()=>{const l=read();$('#rsSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}`;};
+    content.addEventListener('input',e=>{if(e.target.closest?.('.rs-row'))sum();});
+    $('#rsSup').onchange=paint;
+    $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
+    $('#rsFind').oninput=()=>{const q=$('#rsFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
+    $('#rsSave').onclick=async()=>{
+      const btn=$('#rsSave'),l=read(),date=$('#rsDate').value,ref=$('#rsRef').value.trim(),sid=Number($('#rsSup').value);
+      if(!l.length)return toast('Enter at least one quantity','error');
+      if(!ref)return toast('Invoice / reference number is required','error');
+      if(!date||!sid)return toast('Date and supplier are required','error');
+      const bad=l.find(x=>!x.exp||x.exp<date);if(bad)return toast(`Check the expiry date for ${bad.name}`,'error');
+      if(!confirm(`Record receiving ${ref}\n${date} · ${l.length} lines · ${l.reduce((a,x)=>a+x.q,0)} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}\n${$('#rsSup').selectedOptions[0].textContent} → Warehouse`))return;
+      try{assertOnline();}catch(e){return fail(e,'Could not save');}
+      btn.disabled=true;btn.textContent='Saving…';
+      try{
+        const {data,error}=await supabase.rpc('post_receiving',{p_received_date:date,p_reference_no:ref,p_invoice_no:ref,p_supplier_id:sid,p_branch_id:state.warehouse.id,p_items:l.map(x=>({product_id:x.id,quantity:x.q,unit_cost:x.cost,expiry_date:x.exp,batch_no:null,notes:null})),p_notes:null,p_posting_key:newPostingKey()});
+        if(error)throw error;
+        toast(`Receiving ${data?.reference_no||ref} saved`,'success');
+        try{await requireData(true);}catch(e){console.error(e);}
+        go('receiving',true);
+      }catch(e){fail(e,'Could not save');btn.disabled=false;btn.textContent='Record receiving';}
+    };
+    paint();
+  },
   async sheet(){
     const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===Number(state.warehouse?.id)).map(x=>({id:Number(x.product_id),name:x.product_name,code:x.product_code,stock:Number(x.available_quantity||0)})).sort((a,b)=>a.name.localeCompare(b.name));
     const dests=(state.branches||[]).filter(b=>Number(b.id)!==Number(state.warehouse?.id));
