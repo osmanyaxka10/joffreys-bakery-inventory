@@ -456,11 +456,12 @@ async function loadCompareRows(from,to,branchId=1){
   for(const r of ar.data||[])if(m.has(Number(r.product_id)))add(m.get(Number(r.product_id)),'adjustments',r.adjustment_date,Number(r.quantity_change||0));
   return [...m.values()].map(p=>{
     const b=closingFor(Number(branchId),p.product_id,p.product_name);
-    const closing=(b===null?0:b)+p.pre;
-    const available=closing+p.received-p.transferred-p.waste+p.adjustments;
-    const system=Number(here.find(x=>Number(x.product_id)===p.product_id)?.available_quantity||0);
-    return {...p,closing,available,system,diff:system-available,nobase:b===null};
-  }).filter(r=>r.closing||r.received||r.transferred||r.waste||r.adjustments||r.system).sort((a,b)=>a.product_name.localeCompare(b.product_name));
+    const closing=b===null?null:b+p.pre;
+    const available=closing===null?null:closing+p.received-p.transferred-p.waste+p.adjustments;
+    const current=here.find(x=>Number(x.product_id)===p.product_id);
+    const system=current?Number(current.available_quantity||0):null;
+    return {...p,closing,available,system,diff:system===null||available===null?null:system-available,nobase:b===null};
+  }).filter(r=>r.closing!==null&&Math.abs(r.closing)>0||r.received||r.transferred||r.waste||r.adjustments||r.system!==null).sort((a,b)=>a.product_name.localeCompare(b.product_name));
 }
 async function showProductHistory(r){
   const BR=Number(r.branch_id||1);openModal(`${r.product_name} — history`,`${locationName((state.branches.find(x=>Number(x.id)===BR)||{}).name||'')} · ${r.product_code||''}`,`<div class="panel loading">Loading history…</div>`,'wide');
