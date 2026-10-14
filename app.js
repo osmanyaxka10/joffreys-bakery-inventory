@@ -36,6 +36,7 @@ const navItems = [
   ['__g','','Operations'],
   ['receiving','↓','Receiving'],
   ['recvsheet','▤','Receiving Sheet'],
+  ['monthly','▥','Monthly Chart'],
   ['transfers','⇄','Transfers'],
   ['sheet','▤','Transfer Sheet'],
   ['replenishment','⚡','Replenishment'],
@@ -69,6 +70,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  monthly:['Monthly Chart','Warehouse receiving and transfers — day by day'],
   recvsheet:['Receiving Sheet','Type the invoice quantities — expiry and cost per line'],
   sheet:['Transfer Sheet','Type the daily sheet quantities — checked against Warehouse stock'],
   compare:['Compare Sheet','Closing stock, received, transferred and available — per item'],
@@ -910,6 +912,42 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async monthly(){
+    const now=new Date();let ym=state.monthlyYm||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top mo-top"><button class="btn" id="moPrev">◂</button><label>Month<input type="month" id="moMonth" value="${esc(ym)}"></label><button class="btn" id="moNext">▸</button></div><div id="moBody"><p class="muted">Loading…</p></div></div>`;
+    const load=async()=>{
+      ym=$('#moMonth').value;if(!ym)return;state.monthlyYm=ym;
+      const [Y,M]=ym.split('-').map(Number),days=new Date(Y,M,0).getDate(),from=`${ym}-01`,to=`${ym}-${String(days).padStart(2,'0')}`;
+      const body=$('#moBody');body.innerHTML='<p class="muted">Loading…</p>';
+      try{
+        const [r,t]=await Promise.all([
+          supabase.from('v_daily_receiving_report').select('date,product_name,quantity,total_cost').eq('branch_id',1).gte('date',from).lte('date',to).limit(20000),
+          supabase.from('v_daily_transfer_report').select('date,product_name,quantity,total_value').eq('from_branch_id',1).gte('date',from).lte('date',to).limit(20000)]);
+        if(r.error)throw r.error;if(t.error)throw t.error;
+        const R=Array(days).fill(0),T=Array(days).fill(0);let rv=0,tv=0;const ri=new Map(),ti=new Map();
+        (r.data||[]).forEach(x=>{const d=Number(String(x.date).slice(8,10))-1,q=Number(x.quantity)||0;if(d>=0&&d<days){R[d]+=q;rv+=Number(x.total_cost)||0;ri.set(x.product_name,(ri.get(x.product_name)||0)+q);}});
+        (t.data||[]).forEach(x=>{const d=Number(String(x.date).slice(8,10))-1,q=Number(x.quantity)||0;if(d>=0&&d<days){T[d]+=q;tv+=Number(x.total_value)||0;ti.set(x.product_name,(ti.get(x.product_name)||0)+q);}});
+        const sr=R.reduce((a,b)=>a+b,0),st=T.reduce((a,b)=>a+b,0);
+        const max=Math.max(10,...R,...T),nice=(v)=>{const p=Math.pow(10,Math.floor(Math.log10(v)));return Math.ceil(v/p*2)/2*p;},top=nice(max);
+        const W=Math.max(560,days*30+46),H=240,pl=40,pb=24,pt=10,iw=W-pl-6,ih=H-pb-pt,sl=iw/days;
+        let svg=`<svg viewBox="0 0 ${W} ${H}" class="mo-svg" role="img" aria-label="Daily received and transferred pieces">`;
+        for(let i=0;i<=4;i++){const v=top*i/4,y=pt+ih-ih*i/4;svg+=`<line x1="${pl}" x2="${W-6}" y1="${y}" y2="${y}" class="mo-grid"/><text x="${pl-6}" y="${y+4}" text-anchor="end" class="mo-ax">${qty(v)}</text>`;}
+        for(let d=0;d<days;d++){const x0=pl+d*sl,bw=Math.max(5,sl/2-3),hr=ih*R[d]/top,ht=ih*T[d]/top,day=d+1;
+          if(R[d])svg+=`<rect x="${x0+2}" y="${pt+ih-hr}" width="${bw}" height="${hr}" rx="2" class="mo-r"><title>${day}/${M}: received ${qty(R[d])}</title></rect>`;
+          if(T[d])svg+=`<rect x="${x0+2+bw+2}" y="${pt+ih-ht}" width="${bw}" height="${ht}" rx="2" class="mo-t"><title>${day}/${M}: transferred ${qty(T[d])}</title></rect>`;
+          svg+=`<text x="${x0+sl/2}" y="${H-8}" text-anchor="middle" class="mo-ax">${day}</text>`;}
+        svg+='</svg>';
+        const topList=(m)=>[...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([n,q])=>`<div class="mo-li"><span>${esc(n)}</span><b>${qty(q)}</b></div>`).join('')||'<p class="muted">No data</p>';
+        body.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Received',qty(sr)+' pcs',money(rv))}${kpi('Transferred',qty(st)+' pcs',money(tv))}${kpi('Difference',qty(sr-st)+' pcs','received − transferred')}</div>
+        <div class="mo-legend"><span><i class="mo-r"></i>Received</span><span><i class="mo-t"></i>Transferred</span></div>
+        <div class="mo-scroll">${svg}</div>
+        <div class="mo-lists"><div><h4>Top received</h4>${topList(ri)}</div><div><h4>Top transferred</h4>${topList(ti)}</div></div>`;
+      }catch(e){$('#moBody').innerHTML='';fail(e,'Load failed');}
+    };
+    const shift=n=>{const [Y,M]=$('#moMonth').value.split('-').map(Number),d=new Date(Y,M-1+n,1);$('#moMonth').value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;load();};
+    $('#moMonth').onchange=load;$('#moPrev').onclick=()=>shift(-1);$('#moNext').onclick=()=>shift(1);
+    load();
+  },
   async recvsheet(){
     const sups=(state.suppliers||[]).filter(x=>x.is_active!==false);
     const dev=sups.find(x=>/devon/i.test(x.name))||sups[0];
