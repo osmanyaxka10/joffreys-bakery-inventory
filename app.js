@@ -1320,6 +1320,29 @@ const pages = {
   }
 };
 
+async function paintTodo(){
+  try{
+    if(state.currentPage!=='dashboard'||state.dashView==='retool')return;
+    const ex=(state.expiry||[]),exp=ex.filter(x=>Number(x.days_until_expiry)<0),soon=ex.filter(x=>x.days_until_expiry!==null&&Number(x.days_until_expiry)>=0&&Number(x.days_until_expiry)<=1),noexp=ex.filter(x=>x.days_until_expiry===null||x.days_until_expiry===undefined);
+    const sum=a=>a.reduce((t,x)=>t+Number(x.remaining_quantity||0),0);
+    const items=[];
+    if(exp.length)items.push({c:'bad',t:`${qty(sum(exp))} pcs already expired in Warehouse`,go:'expiry'});
+    if(soon.length)items.push({c:'warn',t:`${qty(sum(soon))} pcs expire today or tomorrow`,go:'expiry'});
+    const {data:r}=await supabase.from('v_daily_receiving_report').select('date,product_id,product_name,quantity').eq('branch_id',1).order('date',{ascending:false}).limit(60);
+    const day=r?.[0]?.date;
+    if(day){const last=(r||[]).filter(x=>x.date===day);const {data:t}=await supabase.from('v_daily_transfer_report').select('date,product_id').eq('from_branch_id',1).gte('date',(()=>{const d=new Date(day+'T00:00:00');d.setDate(d.getDate()+1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})()).limit(2000);const sent=new Set((t||[]).map(x=>Number(x.product_id)));const left=last.filter(x=>!sent.has(Number(x.product_id)));
+      if(left.length&&day<isoToday())items.push({c:'warn',t:`${left.length} item(s) received ${dateFmt(day)} not transferred yet`,go:'recon'});
+      else if(left.length)items.push({c:'',t:`${left.length} item(s) received ${dateFmt(day)} ready to transfer`,go:'sheet'});}
+    if(noexp.length)items.push({c:'',t:`${noexp.length} batch(es) have no expiry date`,go:'expiry'});
+    const host=$('#content');if(!host||$('#todoPanel'))return;
+    const el=document.createElement('div');el.id='todoPanel';el.className='panel todo-panel';
+    el.innerHTML=items.length?`<b>To do</b>${items.map(i=>`<button class="todo-item ${i.c}" data-go="${i.go}">${esc(i.t)} <span>›</span></button>`).join('')}`:'<b>To do</b><span class="muted"> Nothing needs attention ✔</span>';
+    host.prepend(el);el.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+  }catch(e){console.warn('todo',e);}
+}
+{const _d=pages.dashboard;pages.dashboard=async function(){const r=await _d.apply(this,arguments);paintTodo();return r;};}
+
+
 function groupTransactionDates(rows,kind){
   const byDate=new Map();
   const txnKey=kind==='receiving'?'receiving_id':'transfer_id';
