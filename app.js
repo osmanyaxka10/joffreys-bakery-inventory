@@ -1076,13 +1076,23 @@ const pages = {
       <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
       <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
       <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
-      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn" id="shPrint">Print blank</button><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
+      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn" id="shFill">Fill from last receiving</button><button class="btn" id="shPrint">Print blank</button><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
     const sum=()=>{const l=read();let bad=0;rows().forEach(r=>{const q=Number(r.querySelector('.sh-qty').value||0),over=q>Number(r.dataset.stock);r.classList.toggle('over',over);});l.forEach(x=>{if(x.q>x.stock)bad++;});$('#shSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs${bad?` · <b class="sh-bad">${bad} over stock</b>`:''}`;return bad;};
     content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty'))sum();});
     const setRef=async()=>{const dt=$('#shDate').value,base='TR-'+dt.replace(/-/g,'')+'-';$('#shRef').value=base+'01';try{const {data}=await supabase.from('transfers').select('reference_no').like('reference_no',base+'%');const used=(data||[]).map(r=>Number(String(r.reference_no).slice(base.length))).filter(Number.isFinite);const n=(used.length?Math.max(...used):0)+1;$('#shRef').value=base+String(n).padStart(2,'0');}catch{}};
     $('#shDate').onchange=setRef;setRef();
+    $('#shFill').onclick=async()=>{
+      try{
+        const {data:d1,error:e1}=await supabase.from('v_daily_receiving_report').select('date').eq('branch_id',1).lte('date',$('#shDate').value||isoToday()).order('date',{ascending:false}).limit(1);
+        if(e1)throw e1;const day=d1?.[0]?.date;if(!day)return toast('No receiving found','error');
+        const {data,error}=await supabase.from('v_daily_receiving_report').select('product_id,quantity').eq('branch_id',1).eq('date',day).limit(2000);if(error)throw error;
+        const rec=new Map();(data||[]).forEach(x=>rec.set(Number(x.product_id),(rec.get(Number(x.product_id))||0)+Number(x.quantity||0)));
+        let n=0,short=0;rows().forEach(r=>{const q=rec.get(Number(r.dataset.id));const inp=r.querySelector('.sh-qty');if(!q||inp.disabled)return;const st=Number(r.dataset.stock),v=Math.min(q,st);if(v<q)short++;if(v>0){inp.value=v;n++;}});
+        sum();toast(`Filled ${n} items from receiving ${dateFmt(day)}${short?` · ${short} limited by stock`:''}. Check the numbers, then record.`);
+      }catch(e){fail(e,'Could not fill');}
+    };
     $('#shPrint').onclick=()=>printBlankSheet('Transfer — Warehouse to '+$('#shTo').selectedOptions[0].textContent,GROUPS.map((g,i)=>({name:g,extra:'Stock',items:wh.filter(r=>grp(r.id)===i&&r.stock>0).map(r=>({name:r.name,extra:qty(r.stock)}))})));
     $('#shFind').oninput=()=>{const q=$('#shFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));$$('.sh-group',content).forEach(h=>{let n=h.nextElementSibling,any=false;while(n&&!n.classList.contains('sh-group')){if(!n.classList.contains('hidden'))any=true;n=n.nextElementSibling;}h.classList.toggle('hidden',!any);});};
     $('#shSave').onclick=async()=>{
