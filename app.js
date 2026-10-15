@@ -1050,12 +1050,15 @@ const pages = {
       if(isDevon)list=list.filter(p=>(SMALL.includes(Number(p.id))?'small':'big')===ls.value);
       list.sort((a,b)=>rank(a.name)-rank(b.name)||String(a.name).localeCompare(b.name));
       $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" data-base="${Number(p.unit_cost||0)}" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
-      sum();
+      sum();restoreR();
     };
     const rows=()=>$$('.rs-row',content);
     const read=()=>rows().map(r=>({id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,q:Number(r.querySelector('.sh-qty').value||0),cost:Number(r.querySelector('.rs-cost').value||0),exp:r.querySelector('.rs-exp').value})).filter(x=>x.q>0);
     const sum=()=>{const l=read();$('#rsSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}`;};
-    content.addEventListener('input',e=>{const t=e.target;if(t.classList?.contains('rs-cost')){const b=Number(t.dataset.base),v=Number(t.value);const ch=b>0&&Math.abs(v-b)>0.0001;t.classList.toggle('chg',ch);t.title=ch?`Was ${money(b)} (${v>b?'+':'−'}${Math.abs((v-b)/b*100).toFixed(1)}%)`:'';}if(t.closest?.('.rs-row'))sum();});
+    const rk=()=>'draft_recv_'+$('#rsSup').value+'_'+($('#rsListWrap').classList.contains('hidden')?'':$('#rsLst').value);
+    const saveR=()=>{try{const o={};rows().forEach(r=>{const v=r.querySelector('.sh-qty').value;if(v)o[r.dataset.id]=v;});if(Object.keys(o).length)localStorage.setItem(rk(),JSON.stringify(o));else localStorage.removeItem(rk());}catch{}};
+    const restoreR=()=>{try{const o=JSON.parse(localStorage.getItem(rk())||'{}');let n=0;rows().forEach(r=>{const v=o[r.dataset.id];if(v){r.querySelector('.sh-qty').value=v;n++;}});if(n){sum();toast(`Draft restored (${n} items)`);}}catch{}};
+    content.addEventListener('input',e=>{const t=e.target;if(t.classList?.contains('rs-cost')){const b=Number(t.dataset.base),v=Number(t.value);const ch=b>0&&Math.abs(v-b)>0.0001;t.classList.toggle('chg',ch);t.title=ch?`Was ${money(b)} (${v>b?'+':'−'}${Math.abs((v-b)/b*100).toFixed(1)}%)`:'';}if(t.closest?.('.rs-row')){sum();if(t.classList.contains('sh-qty'))saveR();}});
     $('#rsPrint').onclick=()=>printBlankSheet('Receiving — '+$('#rsSup').selectedOptions[0].textContent+($('#rsListWrap').classList.contains('hidden')?'':' — '+$('#rsLst').selectedOptions[0].textContent),[{name:'Items',extra:'Cost',items:rows().map(r=>({name:r.querySelector('.sh-name').textContent,extra:r.querySelector('.rs-cost').value}))}]);
     $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
     $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
@@ -1072,6 +1075,7 @@ const pages = {
       try{
         const {data,error}=await supabase.rpc('post_receiving',{p_received_date:date,p_reference_no:ref,p_invoice_no:ref,p_supplier_id:sid,p_branch_id:state.warehouse.id,p_items:l.map(x=>({product_id:x.id,quantity:x.q,unit_cost:x.cost,expiry_date:x.exp,batch_no:null,notes:null})),p_notes:null,p_posting_key:newPostingKey()});
         if(error)throw error;
+        try{localStorage.removeItem(rk());}catch{}
         toast(`Receiving ${data?.reference_no||ref} saved`,'success');
         try{await requireData(true);}catch(e){console.error(e);}
         go('receiving',true);
@@ -1099,7 +1103,9 @@ const pages = {
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
     const sum=()=>{const l=read();let bad=0;rows().forEach(r=>{const q=Number(r.querySelector('.sh-qty').value||0),over=q>Number(r.dataset.stock);r.classList.toggle('over',over);});l.forEach(x=>{if(x.q>x.stock)bad++;});$('#shSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs${bad?` · <b class="sh-bad">${bad} over stock</b>`:''}`;return bad;};
-    content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty'))sum();});
+    const DK='draft_transfer';const saveDraft=()=>{try{const o={};rows().forEach(r=>{const v=r.querySelector('.sh-qty').value;if(v)o[r.dataset.id]=v;});if(Object.keys(o).length)localStorage.setItem(DK,JSON.stringify(o));else localStorage.removeItem(DK);}catch{}};
+    try{const o=JSON.parse(localStorage.getItem(DK)||'{}');let n=0;rows().forEach(r=>{const v=o[r.dataset.id],i=r.querySelector('.sh-qty');if(v&&!i.disabled){i.value=v;n++;}});if(n){sum();toast(`Draft restored (${n} items)`);}}catch{}
+    content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty')){sum();saveDraft();}});
     const setRef=async()=>{const dt=$('#shDate').value,base='TR-'+dt.replace(/-/g,'')+'-';$('#shRef').value=base+'01';try{const {data}=await supabase.from('transfers').select('reference_no').like('reference_no',base+'%');const used=(data||[]).map(r=>Number(String(r.reference_no).slice(base.length))).filter(Number.isFinite);const n=(used.length?Math.max(...used):0)+1;$('#shRef').value=base+String(n).padStart(2,'0');}catch{}};
     $('#shDate').onchange=setRef;setRef();
     $('#shFill').onclick=async()=>{
@@ -1125,6 +1131,7 @@ const pages = {
       try{
         const {data,error}=await supabase.rpc('post_transfer',{p_transfer_date:date,p_reference_no:ref,p_to_branch_id:Number($('#shTo').value),p_items:l.map(x=>({product_id:x.id,quantity:x.q,notes:null})),p_notes:`Transfer ${dateFmt(date)} - Warehouse to ${locationName($('#shTo').selectedOptions[0].textContent)}`,p_posting_key:newPostingKey()});
         if(error)throw error;
+        try{localStorage.removeItem(DK);}catch{}
         toast(`Transfer ${data?.reference_no||ref} saved`,'success');
         try{await requireData(true);}catch(e){console.error(e);}
         go('transfers',true);
