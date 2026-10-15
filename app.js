@@ -37,6 +37,7 @@ const navItems = [
   ['receiving','↓','Receiving'],
   ['recvsheet','▤','Receiving Sheet'],
   ['monthly','▥','Monthly Chart'],
+  ['recon','≋','Reconciliation'],
   ['transfers','⇄','Transfers'],
   ['sheet','▤','Transfer Sheet'],
   ['replenishment','⚡','Replenishment'],
@@ -70,6 +71,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  recon:['Reconciliation','Received on day N vs transferred on day N+1'],
   monthly:['Monthly Chart','Warehouse receiving and transfers — day by day'],
   recvsheet:['Receiving Sheet','Type the invoice quantities — expiry and cost per line'],
   sheet:['Transfer Sheet','Type the daily sheet quantities — checked against Warehouse stock'],
@@ -912,6 +914,37 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async recon(){
+    const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const t0=new Date();const f0=new Date();f0.setDate(f0.getDate()-14);
+    content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top"><label>From<input type="date" id="rcFrom" value="${state.rcFrom||iso(f0)}"></label><label>To<input type="date" id="rcTo" value="${state.rcTo||iso(t0)}"></label><button class="btn primary" id="rcGo">Check</button></div><p class="muted">Received on day N should be transferred on day N+1. Shows only the differences.</p><div id="rcBody"></div></div>`;
+    const run=async()=>{
+      const from=$('#rcFrom').value,to=$('#rcTo').value;if(!from||!to)return;state.rcFrom=from;state.rcTo=to;
+      const body=$('#rcBody');body.innerHTML='<p class="muted">Loading…</p>';
+      try{
+        const end=new Date(to+'T00:00:00');end.setDate(end.getDate()+1);const to2=iso(end);
+        const [r,t]=await Promise.all([
+          supabase.from('v_daily_receiving_report').select('date,product_id,product_name,quantity').eq('branch_id',1).gte('date',from).lte('date',to).limit(20000),
+          supabase.from('v_daily_transfer_report').select('date,product_id,product_name,quantity').eq('from_branch_id',1).gte('date',from).lte('date',to2).limit(20000)]);
+        if(r.error)throw r.error;if(t.error)throw t.error;
+        const next=d=>{const x=new Date(d+'T00:00:00');x.setDate(x.getDate()+1);return iso(x);};
+        const R=new Map(),T=new Map(),names=new Map();
+        (r.data||[]).forEach(x=>{const d=String(x.date).slice(0,10),k=d+'|'+x.product_id;names.set(x.product_id,x.product_name);R.set(k,(R.get(k)||0)+Number(x.quantity||0));});
+        (t.data||[]).forEach(x=>{const d=String(x.date).slice(0,10),k=d+'|'+x.product_id;names.set(x.product_id,x.product_name);T.set(k,(T.get(k)||0)+Number(x.quantity||0));});
+        const today=isoToday(),rows=[];let pending=0;
+        R.forEach((q,k)=>{const [d,p]=k.split('|'),nd=next(d),tq=T.get(nd+'|'+p)||0;
+          if(nd>today){pending+=q;return;}
+          if(Math.abs(q-tq)>0.0001)rows.push({date:d,next:nd,product:names.get(Number(p)),received:q,transferred:tq,diff:q-tq});});
+        T.forEach((tq,k)=>{const [d,p]=k.split('|');if(d<=from||d>to2)return;const pd=iso(new Date(new Date(d+'T00:00:00').getTime()-864e5));if(!R.has(pd+'|'+p))rows.push({date:pd,next:d,product:names.get(Number(p)),received:0,transferred:tq,diff:-tq});});
+        rows.sort((a,b)=>b.date.localeCompare(a.date)||String(a.product).localeCompare(String(b.product)));
+        const short=rows.filter(x=>x.diff>0).reduce((a,x)=>a+x.diff,0),over=rows.filter(x=>x.diff<0).reduce((a,x)=>a-x.diff,0);
+        body.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Not transferred next day',qty(short),'received but not sent',short?'danger':'')}${kpi('Sent without receiving',qty(over),'more than received the day before',over?'warn':'')}${kpi('Waiting for tomorrow',qty(pending),'received today')}</div><div id="rcTable"></div>`;
+        if(!rows.length){$('#rcTable').innerHTML='<div class="panel empty">Everything matches in this period.</div>';return;}
+        renderDataTable($('#rcTable'),rows,[{key:'date',label:'Received',type:'date'},{key:'next',label:'Transfer day',type:'date'},{key:'product',label:'Product'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right'}],{});
+      }catch(e){body.innerHTML=`<div class="panel empty">${esc(e.message||e)}</div>`;}
+    };
+    $('#rcGo').onclick=run;run();
+  },
   async monthly(){
     const now=new Date();let ym=state.monthlyYm||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top mo-top"><button class="btn" id="moPrev">◂</button><label>Month<input type="month" id="moMonth" value="${esc(ym)}"></label><button class="btn" id="moNext">▸</button></div><div id="moBody"><p class="muted">Loading…</p></div></div>`;
