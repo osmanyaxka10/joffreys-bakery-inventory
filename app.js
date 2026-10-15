@@ -1056,9 +1056,9 @@ const pages = {
     const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===Number(state.warehouse?.id)).map(x=>({id:Number(x.product_id),name:x.product_name,code:x.product_code,stock:Number(x.available_quantity||0)})).sort((a,b)=>a.name.localeCompare(b.name));
     const dests=(state.branches||[]).filter(b=>Number(b.id)!==Number(state.warehouse?.id));
     const jed=dests.find(b=>/jeddah/i.test(b.name)&&!/airport|shs/i.test(b.name))||dests[0];
-    const GROUPS=['Big sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
+    const GROUPS=['Club & small sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
     const supOf=new Map((state.products||[]).map(p=>[Number(p.id),Number(p.supplier_id)]));
-    const grp=id=>{if([53,54,55].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
+    const grp=id=>{if([53,54,55,19,20,21,22].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
     wh.sort((a,b)=>a.name.localeCompare(b.name));
     const d0=isoToday(),ymd=d0.replace(/-/g,'');
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
