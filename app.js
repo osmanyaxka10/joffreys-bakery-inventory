@@ -53,6 +53,7 @@ const navItems = [
   ['__g','','Insights'],
   ['reports','▥','Reports'],
   ['history','◔','Daily History'],
+  ['insights','◎','Stock Insights'],
   ['prices','％','Price Changes'],
   ['__g','','Master Data'],
   ['suppliers','♟','Suppliers'],
@@ -72,6 +73,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  insights:['Stock Insights','ABC class, days of cover and dead stock — Warehouse'],
   prices:['Price Changes','Supplier cost changes between invoices'],
   recon:['Reconciliation','Received on day N vs transferred on day N+1'],
   monthly:['Monthly Chart','Warehouse receiving and transfers — day by day'],
@@ -922,6 +924,23 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async insights(){
+    const days=30,iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const f=new Date();f.setDate(f.getDate()-days);const from=iso(f);
+    content.innerHTML='<div class="panel sheet-panel"><p class="muted">Based on Warehouse transfers out in the last 30 days. A = top 80% of value, B = next 15%, C = last 5%.</p><div id="inBody"><p class="muted">Loading…</p></div></div>';
+    try{
+      const {data,error}=await supabase.from('v_daily_transfer_report').select('date,product_id,quantity,total_value').eq('from_branch_id',1).gte('date',from).limit(20000);if(error)throw error;
+      const use=new Map(),last=new Map();(data||[]).forEach(x=>{const id=Number(x.product_id);const u=use.get(id)||{q:0,v:0};u.q+=Number(x.quantity||0);u.v+=Number(x.total_value||0);use.set(id,u);const d=String(x.date).slice(0,10);if(!last.get(id)||d>last.get(id))last.set(id,d);});
+      const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===1);
+      const today=isoToday(),gap=d=>Math.round((new Date(today)-new Date(d))/864e5);
+      const rows=wh.map(p=>{const id=Number(p.product_id),u=use.get(id)||{q:0,v:0},stock=Number(p.available_quantity||0),per=u.q/days;return {id,product:p.product_name,stock,used:u.q,value:u.v,per_day:per,cover:per>0?stock/per:null,last:last.get(id)||null,since:last.get(id)?gap(last.get(id)):null};}).filter(r=>r.stock>0||r.used>0);
+      rows.sort((a,b)=>b.value-a.value);const tot=rows.reduce((a,r)=>a+r.value,0);let cum=0;
+      rows.forEach(r=>{cum+=r.value;r.abc=r.value<=0?'—':(cum-r.value)/tot<0.8?'A':(cum-r.value)/tot<0.95?'B':'C';r.status=r.stock>0&&r.used===0?'Dead (no transfer 30d)':r.stock>0&&r.since>=7?'Slow (7d+ idle)':r.cover!==null&&r.cover>7?'Overstock':r.cover!==null&&r.cover<1&&r.stock>0?'Low cover':'OK';});
+      const dead=rows.filter(r=>r.status.startsWith('Dead')),slow=rows.filter(r=>r.status.startsWith('Slow')),over=rows.filter(r=>r.status==='Overstock');
+      $('#inBody').innerHTML=`<div class="kpi-grid kpi-grid-4">${kpi('Dead stock',qty(dead.reduce((a,r)=>a+r.stock,0)),dead.length+' items, no transfer in 30 days',dead.length?'danger':'')}${kpi('Slow items',qty(slow.length),'no transfer for 7+ days',slow.length?'warn':'')}${kpi('Overstock',qty(over.length),'more than 7 days of cover')}${kpi('A items',qty(rows.filter(r=>r.abc==='A').length),'drive 80% of transfers')}</div><div id="inTable"></div>`;
+      renderDataTable($('#inTable'),rows,[{key:'product',label:'Product'},{key:'abc',label:'Class'},{key:'stock',label:'Stock',type:'qty',align:'right'},{key:'used',label:'Transferred 30d',type:'qty',align:'right'},{key:'per_day',label:'Per day',align:'right',render:v=>v?v.toFixed(1):'0'},{key:'cover',label:'Days of cover',align:'right',render:v=>v===null?'—':v.toFixed(1)},{key:'last',label:'Last transfer',type:'date'},{key:'value',label:'Value 30d',type:'money',align:'right'},{key:'status',label:'Status'}],{filename:'stock_insights',filters:[{key:'abc',label:'Class'},{key:'status',label:'Status'}]});
+    }catch(e){$('#inBody').innerHTML=`<div class="panel empty">${esc(e.message||e)}</div>`;}
+  },
   async prices(){
     content.innerHTML='<div class="panel sheet-panel"><p class="muted">Latest invoice cost compared with the previous different cost for each product.</p><div id="prBody"><p class="muted">Loading…</p></div></div>';
     try{

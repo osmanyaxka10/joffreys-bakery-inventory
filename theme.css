@@ -173,3 +173,4 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 
 .sh-group{position:sticky;top:0;z-index:1;margin:10px 0 2px;padding:7px 8px;background:#eef2ff;color:#1d3a8a;font-weight:700;font-size:13px;border-radius:6px}.sh-group small{font-weight:500;opacity:.7;margin-left:4px}.sh-group.hidden{display:none}
 .rs-cost.chg{border-color:#f79009!important;background:#fffaeb}
+.kpi-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:700px){.kpi-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
