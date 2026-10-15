@@ -1039,8 +1039,9 @@ const pages = {
       <label id="rsListWrap">List<select id="rsLst"></select></label>
       <label>Invoice / Reference No<input id="rsRef" placeholder="e.g. 114700" autocomplete="off"></label>
       <label class="sh-search">Find<input id="rsFind" placeholder="Search item" autocomplete="off"></label></div>
+      <div class="sheet-tools"><button class="btn" id="rsPrint">Print blank</button></div>
       <div class="sheet-list" id="rsList"></div>
-      <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn" id="rsPrint">Print blank</button><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
+      <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
     const paint=()=>{
       const sid=Number($('#rsSup').value),date=$('#rsDate').value||d0;
       const isDevon=!!dev&&sid===Number(dev.id),SMALL=[11,12,13,14,19,20,21,22,53,54,55];
@@ -1098,8 +1099,9 @@ const pages = {
       <label>To<select id="shTo">${dests.map(b=>`<option value="${b.id}" ${jed&&b.id===jed.id?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label>
       <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
       <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
+      <div class="sheet-tools"><button class="btn" id="shFill">Fill from last receiving</button><button class="btn" id="shPrint">Print blank</button></div>
       <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
-      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn" id="shFill">Fill from last receiving</button><button class="btn" id="shPrint">Print blank</button><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
+      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
     const sum=()=>{const l=read();let bad=0;rows().forEach(r=>{const q=Number(r.querySelector('.sh-qty').value||0),over=q>Number(r.dataset.stock);r.classList.toggle('over',over);});l.forEach(x=>{if(x.q>x.stock)bad++;});$('#shSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs${bad?` · <b class="sh-bad">${bad} over stock</b>`:''}`;return bad;};
