@@ -1010,13 +1010,19 @@ const pages = {
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
       <label>Date<input type="date" id="rsDate" value="${esc(d0)}" max="${esc(d0)}"></label>
       <label>Supplier<select id="rsSup">${sups.map(x=>`<option value="${x.id}" ${dev&&x.id===dev.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <label id="rsListWrap">List<select id="rsLst"></select></label>
       <label>Invoice / Reference No<input id="rsRef" placeholder="e.g. 114700" autocomplete="off"></label>
       <label class="sh-search">Find<input id="rsFind" placeholder="Search item" autocomplete="off"></label></div>
       <div class="sheet-list" id="rsList"></div>
       <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
     const paint=()=>{
       const sid=Number($('#rsSup').value),date=$('#rsDate').value||d0;
-      const list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid).sort((a,b)=>String(a.name).localeCompare(b.name));
+      const isDevon=!!dev&&sid===Number(dev.id),SMALL=[11,12,13,14,19,20,21,22,53,54,55];
+      const lw=$('#rsListWrap'),ls=$('#rsLst');lw.classList.toggle('hidden',!isDevon);
+      if(isDevon&&!ls.options.length)ls.innerHTML='<option value="big">Big croissants, English cakes &amp; cakes</option><option value="small">Small croissants &amp; sandwiches</option>';
+      let list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid);
+      if(isDevon)list=list.filter(p=>(SMALL.includes(Number(p.id))?'small':'big')===ls.value);
+      list.sort((a,b)=>String(a.name).localeCompare(b.name));
       $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
       sum();
     };
@@ -1024,7 +1030,7 @@ const pages = {
     const read=()=>rows().map(r=>({id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,q:Number(r.querySelector('.sh-qty').value||0),cost:Number(r.querySelector('.rs-cost').value||0),exp:r.querySelector('.rs-exp').value})).filter(x=>x.q>0);
     const sum=()=>{const l=read();$('#rsSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}`;};
     content.addEventListener('input',e=>{if(e.target.closest?.('.rs-row'))sum();});
-    $('#rsSup').onchange=paint;
+    $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
     $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
     $('#rsFind').oninput=()=>{const q=$('#rsFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
     $('#rsSave').onclick=async()=>{
@@ -1050,13 +1056,17 @@ const pages = {
     const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===Number(state.warehouse?.id)).map(x=>({id:Number(x.product_id),name:x.product_name,code:x.product_code,stock:Number(x.available_quantity||0)})).sort((a,b)=>a.name.localeCompare(b.name));
     const dests=(state.branches||[]).filter(b=>Number(b.id)!==Number(state.warehouse?.id));
     const jed=dests.find(b=>/jeddah/i.test(b.name)&&!/airport|shs/i.test(b.name))||dests[0];
+    const GROUPS=['Big sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
+    const supOf=new Map((state.products||[]).map(p=>[Number(p.id),Number(p.supplier_id)]));
+    const grp=id=>{if([53,54,55].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
+    wh.sort((a,b)=>a.name.localeCompare(b.name));
     const d0=isoToday(),ymd=d0.replace(/-/g,'');
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
       <label>Date<input type="date" id="shDate" value="${esc(d0)}"></label>
       <label>To<select id="shTo">${dests.map(b=>`<option value="${b.id}" ${jed&&b.id===jed.id?'selected':''}>${esc(locationName(b.name))}</option>`).join('')}</select></label>
       <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
       <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
-      <div class="sheet-list" id="shList">${wh.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join('')}</div>
+      <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
       <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
@@ -1064,7 +1074,7 @@ const pages = {
     content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty'))sum();});
     const setRef=async()=>{const dt=$('#shDate').value,base='TR-'+dt.replace(/-/g,'')+'-';$('#shRef').value=base+'01';try{const {data}=await supabase.from('transfers').select('reference_no').like('reference_no',base+'%');const used=(data||[]).map(r=>Number(String(r.reference_no).slice(base.length))).filter(Number.isFinite);const n=(used.length?Math.max(...used):0)+1;$('#shRef').value=base+String(n).padStart(2,'0');}catch{}};
     $('#shDate').onchange=setRef;setRef();
-    $('#shFind').oninput=()=>{const q=$('#shFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
+    $('#shFind').oninput=()=>{const q=$('#shFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));$$('.sh-group',content).forEach(h=>{let n=h.nextElementSibling,any=false;while(n&&!n.classList.contains('sh-group')){if(!n.classList.contains('hidden'))any=true;n=n.nextElementSibling;}h.classList.toggle('hidden',!any);});};
     $('#shSave').onclick=async()=>{
       const btn=$('#shSave');const l=read();
       if(!l.length)return toast('Enter at least one quantity','error');

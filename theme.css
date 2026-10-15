@@ -170,3 +170,5 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 .mo-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:8px}
 .mo-lists h4{margin:0 0 6px}.mo-li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,#e8ebf0);font-size:14px}
 .mo-mode{display:flex;gap:8px;margin:10px 0 0}
+
+.sh-group{position:sticky;top:0;z-index:1;margin:10px 0 2px;padding:7px 8px;background:#eef2ff;color:#1d3a8a;font-weight:700;font-size:13px;border-radius:6px}.sh-group small{font-weight:500;opacity:.7;margin-left:4px}.sh-group.hidden{display:none}
