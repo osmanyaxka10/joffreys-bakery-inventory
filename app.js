@@ -53,6 +53,7 @@ const navItems = [
   ['__g','','Insights'],
   ['reports','▥','Reports'],
   ['history','◔','Daily History'],
+  ['prices','％','Price Changes'],
   ['__g','','Master Data'],
   ['suppliers','♟','Suppliers'],
   ['products','□','Products']
@@ -71,6 +72,7 @@ const pageMeta = {
   suppliers:['Suppliers','Supplier activity using real data'],
   products:['Products','Real Supabase product master'],
   counts:['Closing Counts','Verified 30/09/2026 closing stock per location'],
+  prices:['Price Changes','Supplier cost changes between invoices'],
   recon:['Reconciliation','Received on day N vs transferred on day N+1'],
   monthly:['Monthly Chart','Warehouse receiving and transfers — day by day'],
   recvsheet:['Receiving Sheet','Type the invoice quantities — expiry and cost per line'],
@@ -914,6 +916,22 @@ const pages = {
   async receiving(){docsPage('receiving');},
 
   async transfers(){docsPage('transfer');},
+  async prices(){
+    content.innerHTML='<div class="panel sheet-panel"><p class="muted">Latest invoice cost compared with the previous different cost for each product.</p><div id="prBody"><p class="muted">Loading…</p></div></div>';
+    try{
+      const {data,error}=await supabase.from('v_daily_receiving_report').select('date,product_id,product_name,supplier_name,invoice_no,unit_cost').order('date',{ascending:true}).limit(20000);
+      if(error)throw error;
+      const by=new Map();(data||[]).forEach(x=>{const c=Number(x.unit_cost);if(!(c>0))return;if(!by.has(x.product_id))by.set(x.product_id,[]);by.get(x.product_id).push({...x,unit_cost:c});});
+      const rows=[];
+      by.forEach(list=>{const last=list[list.length-1];let prev=null;for(let i=list.length-2;i>=0;i--){if(Math.abs(list[i].unit_cost-last.unit_cost)>0.0001){prev=list[i];break;}}
+        if(prev)rows.push({product:last.product_name,supplier:last.supplier_name,old_date:prev.date,old_cost:prev.unit_cost,date:last.date,invoice:last.invoice_no,new_cost:last.unit_cost,pct:(last.unit_cost-prev.unit_cost)/prev.unit_cost*100});});
+      rows.sort((a,b)=>String(b.date).localeCompare(String(a.date))||Math.abs(b.pct)-Math.abs(a.pct));
+      const up=rows.filter(r=>r.pct>0).length,dn=rows.length-up;
+      $('#prBody').innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Products changed',qty(rows.length),'of '+by.size+' received')}${kpi('Cost went up',qty(up),'check these first',up?'danger':'')}${kpi('Cost went down',qty(dn),'')}</div><div id="prTable"></div>`;
+      if(!rows.length){$('#prTable').innerHTML='<div class="panel empty">No cost changes found.</div>';return;}
+      renderDataTable($('#prTable'),rows,[{key:'date',label:'Latest',type:'date'},{key:'invoice',label:'Invoice'},{key:'product',label:'Product'},{key:'supplier',label:'Supplier'},{key:'old_cost',label:'Old cost',type:'money',align:'right'},{key:'new_cost',label:'New cost',type:'money',align:'right'},{key:'pct',label:'Change %',align:'right',render:(v,r)=>`<span class="${r.pct>0?'var-neg':'var-pos'}">${r.pct>0?'+':'−'}${Math.abs(r.pct).toFixed(1)}%</span>`}],{filename:'price_changes'});
+    }catch(e){$('#prBody').innerHTML=`<div class="panel empty">${esc(e.message||e)}</div>`;}
+  },
   async recon(){
     const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const t0=new Date();const f0=new Date();f0.setDate(f0.getDate()-14);
@@ -940,7 +958,7 @@ const pages = {
         const short=rows.filter(x=>x.diff>0).reduce((a,x)=>a+x.diff,0),over=rows.filter(x=>x.diff<0).reduce((a,x)=>a-x.diff,0);
         body.innerHTML=`<div class="kpi-grid kpi-grid-3">${kpi('Not transferred next day',qty(short),'received but not sent',short?'danger':'')}${kpi('Sent without receiving',qty(over),'more than received the day before',over?'warn':'')}${kpi('Waiting for tomorrow',qty(pending),'received today')}</div><div id="rcTable"></div>`;
         if(!rows.length){$('#rcTable').innerHTML='<div class="panel empty">Everything matches in this period.</div>';return;}
-        renderDataTable($('#rcTable'),rows,[{key:'date',label:'Received',type:'date'},{key:'next',label:'Transfer day',type:'date'},{key:'product',label:'Product'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right'}],{});
+        renderDataTable($('#rcTable'),rows,[{key:'date',label:'Received',type:'date'},{key:'next',label:'Transfer day',type:'date'},{key:'product',label:'Product'},{key:'received',label:'Received',type:'qty',align:'right'},{key:'transferred',label:'Transferred',type:'qty',align:'right'},{key:'diff',label:'Difference',type:'qty',align:'right'}],{filename:'reconciliation'});
       }catch(e){body.innerHTML=`<div class="panel empty">${esc(e.message||e)}</div>`;}
     };
     $('#rcGo').onclick=run;run();
