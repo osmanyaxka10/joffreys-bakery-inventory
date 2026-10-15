@@ -1030,13 +1030,13 @@ const pages = {
       let list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid);
       if(isDevon)list=list.filter(p=>(SMALL.includes(Number(p.id))?'small':'big')===ls.value);
       list.sort((a,b)=>rank(a.name)-rank(b.name)||String(a.name).localeCompare(b.name));
-      $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
+      $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" data-base="${Number(p.unit_cost||0)}" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
       sum();
     };
     const rows=()=>$$('.rs-row',content);
     const read=()=>rows().map(r=>({id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,q:Number(r.querySelector('.sh-qty').value||0),cost:Number(r.querySelector('.rs-cost').value||0),exp:r.querySelector('.rs-exp').value})).filter(x=>x.q>0);
     const sum=()=>{const l=read();$('#rsSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}`;};
-    content.addEventListener('input',e=>{if(e.target.closest?.('.rs-row'))sum();});
+    content.addEventListener('input',e=>{const t=e.target;if(t.classList?.contains('rs-cost')){const b=Number(t.dataset.base),v=Number(t.value);const ch=b>0&&Math.abs(v-b)>0.0001;t.classList.toggle('chg',ch);t.title=ch?`Was ${money(b)} (${v>b?'+':'−'}${Math.abs((v-b)/b*100).toFixed(1)}%)`:'';}if(t.closest?.('.rs-row'))sum();});
     $('#rsPrint').onclick=()=>printBlankSheet('Receiving — '+$('#rsSup').selectedOptions[0].textContent+($('#rsListWrap').classList.contains('hidden')?'':' — '+$('#rsLst').selectedOptions[0].textContent),[{name:'Items',extra:'Cost',items:rows().map(r=>({name:r.querySelector('.sh-name').textContent,extra:r.querySelector('.rs-cost').value}))}]);
     $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
     $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
