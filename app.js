@@ -253,6 +253,12 @@ function exportRowsExcel(rows,columns,filename){
   const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</table></body></html>`;downloadBlob(html,'application/vnd.ms-excel',`${filename}.xls`);
 }
 function downloadBlob(text,type,name){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function printBlankSheet(title,groups){
+  const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print','error');
+  const body=groups.filter(g=>g.items.length).map(g=>`<h2>${esc(g.name)}</h2><table><thead><tr><th>Item</th>${g.extra?`<th class="n">${esc(g.extra)}</th>`:''}<th class="q">Qty</th></tr></thead><tbody>${g.items.map(i=>`<tr><td>${esc(i.name)}</td>${g.extra?`<td class="n">${esc(i.extra??'')}</td>`:''}<td class="q"></td></tr>`).join('')}</tbody></table>`).join('');
+  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial;padding:16px;color:#111}h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;background:#eee;padding:4px 6px;margin:12px 0 0}table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #999;padding:5px 6px;text-align:left}th{font-size:10px}.n{width:70px;text-align:right}.q{width:90px}tr{page-break-inside:avoid}h2{page-break-after:avoid}</style></head><body><h1>${esc(title)}</h1><p style="margin:0 0 6px;font-size:11px">Date: ____ / ____ / ________ &nbsp; Ref: ______________</p>${body}</body></html>`);
+  w.document.close();w.focus();setTimeout(()=>w.print(),300);
+}
 function printRows(rows,columns,title){
   const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print','error');
   w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial;padding:20px;color:#111}h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#eee}@media print{body{padding:0}}</style></head><body><h1>${esc(title)}</h1><p>Generated ${dateTimeFmt(new Date().toISOString())}</p><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(c=>`<td>${esc(rawExportValue(r[c.key],c))}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);w.document.close();setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400);
@@ -1015,7 +1021,7 @@ const pages = {
       <label>Invoice / Reference No<input id="rsRef" placeholder="e.g. 114700" autocomplete="off"></label>
       <label class="sh-search">Find<input id="rsFind" placeholder="Search item" autocomplete="off"></label></div>
       <div class="sheet-list" id="rsList"></div>
-      <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
+      <div class="sheet-bar"><div id="rsSum">0 lines · 0 pcs</div><button class="btn" id="rsPrint">Print blank</button><button class="btn primary" id="rsSave" ${canPost()?'':'disabled'}>Record receiving</button></div></div>`;
     const paint=()=>{
       const sid=Number($('#rsSup').value),date=$('#rsDate').value||d0;
       const isDevon=!!dev&&sid===Number(dev.id),SMALL=[11,12,13,14,19,20,21,22,53,54,55];
@@ -1031,6 +1037,7 @@ const pages = {
     const read=()=>rows().map(r=>({id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,q:Number(r.querySelector('.sh-qty').value||0),cost:Number(r.querySelector('.rs-cost').value||0),exp:r.querySelector('.rs-exp').value})).filter(x=>x.q>0);
     const sum=()=>{const l=read();$('#rsSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}`;};
     content.addEventListener('input',e=>{if(e.target.closest?.('.rs-row'))sum();});
+    $('#rsPrint').onclick=()=>printBlankSheet('Receiving — '+$('#rsSup').selectedOptions[0].textContent+($('#rsListWrap').classList.contains('hidden')?'':' — '+$('#rsLst').selectedOptions[0].textContent),[{name:'Items',extra:'Cost',items:rows().map(r=>({name:r.querySelector('.sh-name').textContent,extra:r.querySelector('.rs-cost').value}))}]);
     $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
     $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
     $('#rsFind').oninput=()=>{const q=$('#rsFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
@@ -1069,13 +1076,14 @@ const pages = {
       <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
       <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
       <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
-      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
+      <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn" id="shPrint">Print blank</button><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
     const sum=()=>{const l=read();let bad=0;rows().forEach(r=>{const q=Number(r.querySelector('.sh-qty').value||0),over=q>Number(r.dataset.stock);r.classList.toggle('over',over);});l.forEach(x=>{if(x.q>x.stock)bad++;});$('#shSum').innerHTML=`${l.length} lines · ${qty(l.reduce((a,x)=>a+x.q,0))} pcs${bad?` · <b class="sh-bad">${bad} over stock</b>`:''}`;return bad;};
     content.addEventListener('input',e=>{if(e.target.classList?.contains('sh-qty'))sum();});
     const setRef=async()=>{const dt=$('#shDate').value,base='TR-'+dt.replace(/-/g,'')+'-';$('#shRef').value=base+'01';try{const {data}=await supabase.from('transfers').select('reference_no').like('reference_no',base+'%');const used=(data||[]).map(r=>Number(String(r.reference_no).slice(base.length))).filter(Number.isFinite);const n=(used.length?Math.max(...used):0)+1;$('#shRef').value=base+String(n).padStart(2,'0');}catch{}};
     $('#shDate').onchange=setRef;setRef();
+    $('#shPrint').onclick=()=>printBlankSheet('Transfer — Warehouse to '+$('#shTo').selectedOptions[0].textContent,GROUPS.map((g,i)=>({name:g,extra:'Stock',items:wh.filter(r=>grp(r.id)===i&&r.stock>0).map(r=>({name:r.name,extra:qty(r.stock)}))})));
     $('#shFind').oninput=()=>{const q=$('#shFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));$$('.sh-group',content).forEach(h=>{let n=h.nextElementSibling,any=false;while(n&&!n.classList.contains('sh-group')){if(!n.classList.contains('hidden'))any=true;n=n.nextElementSibling;}h.classList.toggle('hidden',!any);});};
     $('#shSave').onclick=async()=>{
       const btn=$('#shSave');const l=read();
