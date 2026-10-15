@@ -34,12 +34,12 @@ const navItems = [
   ['__g','','Overview'],
   ['dashboard','▦','Dashboard'],
   ['__g','','Operations'],
-  ['receiving','↓','Receiving'],
   ['recvsheet','▤','Receiving Sheet'],
-  ['monthly','▥','Monthly Chart'],
-  ['recon','≋','Reconciliation'],
-  ['transfers','⇄','Transfers'],
+  ['receiving','↓','Receiving'],
   ['sheet','▤','Transfer Sheet'],
+  ['transfers','⇄','Transfers'],
+  ['recon','≋','Reconciliation'],
+  ['monthly','▥','Monthly Chart'],
   ['replenishment','⚡','Replenishment'],
   ['__g','','Inventory'],
   ['stock','▤','Stock'],
@@ -1003,6 +1003,7 @@ const pages = {
     load();
   },
   async recvsheet(){
+    const rank=n=>{n=String(n).toLowerCase();return /croissant/.test(n)?(/chocolate/.test(n)?3:/plain|butter/.test(n)?0:/white/.test(n)?1:2):/english/.test(n)?10:/muffin/.test(n)?30:/pudding/.test(n)?40:/club/.test(n)?50:/sandwich/.test(n)?60:20;};
     const sups=(state.suppliers||[]).filter(x=>x.is_active!==false);
     const dev=sups.find(x=>/devon/i.test(x.name))||sups[0];
     const d0=isoToday();
@@ -1022,7 +1023,7 @@ const pages = {
       if(isDevon&&!ls.options.length)ls.innerHTML='<option value="big">Big croissants, English cakes &amp; cakes</option><option value="small">Small croissants &amp; sandwiches</option>';
       let list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid);
       if(isDevon)list=list.filter(p=>(SMALL.includes(Number(p.id))?'small':'big')===ls.value);
-      list.sort((a,b)=>String(a.name).localeCompare(b.name));
+      list.sort((a,b)=>rank(a.name)-rank(b.name)||String(a.name).localeCompare(b.name));
       $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
       sum();
     };
@@ -1059,7 +1060,8 @@ const pages = {
     const GROUPS=['Club & small sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
     const supOf=new Map((state.products||[]).map(p=>[Number(p.id),Number(p.supplier_id)]));
     const grp=id=>{if([53,54,55,19,20,21,22].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
-    wh.sort((a,b)=>a.name.localeCompare(b.name));
+    const rk=n=>{n=String(n).toLowerCase();return /club/.test(n)?0:1;};
+    wh.sort((a,b)=>rk(a.name)-rk(b.name)||a.name.localeCompare(b.name));
     const d0=isoToday(),ymd=d0.replace(/-/g,'');
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
       <label>Date<input type="date" id="shDate" value="${esc(d0)}"></label>
