@@ -180,3 +180,4 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 @media(max-width:700px){.sheet-bar{padding-right:78px}}
 .rc-h{margin:18px 0 6px;font-size:14px}
 .sh-stock{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}.sh-exp{font-size:10px;font-style:normal;color:#667085}.sh-exp.warn{color:#b54708}.sh-exp.bad{color:#d92d20;font-weight:700}
+.sh-group[data-g="0"]{background:#fef3f2;color:#b42318}

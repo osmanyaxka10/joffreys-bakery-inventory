@@ -1093,13 +1093,14 @@ const pages = {
     const wh=(state.positions||[]).filter(x=>Number(x.branch_id)===Number(state.warehouse?.id)).map(x=>({id:Number(x.product_id),name:x.product_name,code:x.product_code,stock:Number(x.available_quantity||0)})).sort((a,b)=>a.name.localeCompare(b.name));
     const dests=(state.branches||[]).filter(b=>Number(b.id)!==Number(state.warehouse?.id));
     const jed=dests.find(b=>/jeddah/i.test(b.name)&&!/airport|shs/i.test(b.name))||dests[0];
-    const GROUPS=['Club & small sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
+    const GROUPS=['Near expiry — send first','Club & small sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
     const supOf=new Map((state.products||[]).map(p=>[Number(p.id),Number(p.supplier_id)]));
-    const grp=id=>{if([53,54,55,19,20,21,22].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
-    const expMap=new Map();(state.expiry||[]).forEach(x=>{if(!x.expiry_date||Number(x.remaining_quantity)<=0)return;const k=x.product_name,cur=expMap.get(k);if(!cur||x.expiry_date<cur.d)expMap.set(k,{d:x.expiry_date,n:Number(x.days_until_expiry)});});
+        const expMap=new Map();(state.expiry||[]).forEach(x=>{if(!x.expiry_date||Number(x.remaining_quantity)<=0)return;const k=x.product_name,cur=expMap.get(k);if(!cur||x.expiry_date<cur.d)expMap.set(k,{d:x.expiry_date,n:Number(x.days_until_expiry)});});
     const expOf=name=>{const e=expMap.get(name);return e?`<small class="sh-exp${e.n<=1?' bad':e.n<=3?' warn':''}">exp ${dateFmt(e.d).slice(0,5)}</small>`:'';};
+    const nameOf=new Map(wh.map(r=>[r.id,r.name]));
+    const grp=id=>{const e=expMap.get(nameOf.get(id)),st=(wh.find(r=>r.id===id)||{}).stock;if(e&&e.n<=3&&st>0)return 0;if([53,54,55,19,20,21,22].includes(id))return 1;const sp=supOf.get(id);if(sp===3)return 2;if(sp===2&&id!==46)return 3;if(sp===4)return 4;return 5;};
     const rk=n=>{n=String(n).toLowerCase();return /club/.test(n)?0:1;};
-    wh.sort((a,b)=>rk(a.name)-rk(b.name)||a.name.localeCompare(b.name));
+    wh.sort((a,b)=>{const ea=expMap.get(a.name),eb=expMap.get(b.name);return (ea?ea.d:'9')<(eb?eb.d:'9')?-1:(ea?ea.d:'9')>(eb?eb.d:'9')?1:rk(a.name)-rk(b.name)||a.name.localeCompare(b.name);});
     const d0=isoToday(),ymd=d0.replace(/-/g,'');
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
       <label>Date<input type="date" id="shDate" value="${esc(d0)}"></label>
