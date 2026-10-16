@@ -226,7 +226,7 @@ function miniMetric(label,value){return `<div class="mini-metric"><span>${esc(la
 function donutChart(title,items){
   const total=items.reduce((a,x)=>a+Number(x.value||0),0);if(total<=0)return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="empty">No data</div></div>`;let cursor=0;const stops=[];
   for(const item of items){const start=cursor;cursor+=Number(item.value||0)/total*360;stops.push(`${item.color} ${start}deg ${cursor}deg`);}
-  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-hole"><strong>${qty(total)}</strong><span>positions</span></div></div><div class="chart-legend">${items.map(x=>`<div><i style="background:${x.color}"></i><span>${esc(x.label)}</span><strong>${qty(x.value)}</strong></div>`).join('')}</div></div></div>`;
+  return `<div class="chart-card"><div class="chart-title">${esc(title)}</div><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-hole"><strong>${qty(total)}</strong><span>units</span></div></div><div class="chart-legend">${items.map(x=>`<div><i style="background:${x.color}"></i><span>${esc(x.label)}</span><strong>${qty(x.value)}</strong></div>`).join('')}</div></div></div>`;
 }
 function barChart(title,items,color=COLORS.neutral,formatter=qty){
   const max=Math.max(0,...items.map(x=>Number(x.value||0)));
@@ -885,7 +885,7 @@ const pages = {
         ${kpi('Transfers since 30/09',qty(trUnits),`${trTxn} transfers · ${money(trValue)}`,'purple')}
         ${kpi('Expiring ≤ 7 days',qty(exp3.length+exp7.length),`${qty(exp3Units+sum(exp7,'remaining_quantity'))} units`,'warn')}
       </div>
-      <div class="chart-grid">${snaps.length>1?trendChart('Inventory value — last nights (SAR)',snaps.map(d=>({label:dateFmt(d.date),value:d.value})),COLORS.receiving,v=>num(v,0)):`<div class="chart-card"><div class="chart-title">Inventory value trend</div><div class="empty chart-empty">Builds up automatically — one point per night</div></div>`}${donutChart('Expiry risk (units)',expiryRisk)}</div>
+      <div class="chart-grid">${snaps.length>1?trendChart('Inventory value — last nights (SAR)',snaps.map(d=>({label:dateFmt(d.date).slice(0,5),value:d.value})),COLORS.receiving,v=>num(v,0)):`<div class="chart-card"><div class="chart-title">Inventory value trend</div><div class="empty chart-empty">Builds up automatically — one point per night</div></div>`}${donutChart('Expiry risk (units)',expiryRisk)}</div>
       <div class="chart-grid">${donutChart('Bakery Warehouse stock health',health)}${compareChart('Bakery Warehouse vs Jeddah Shops',[{label:'Bakery Warehouse',value:whUnits,color:COLORS.neutral},{label:'Jeddah Shops',value:shopUnits,color:COLORS.transfer}])}</div>
       <div class="dash-section-head"><h3>Activity</h3><span>30/09/2026 — ${dateFmt(to)} · daily units</span></div>
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
