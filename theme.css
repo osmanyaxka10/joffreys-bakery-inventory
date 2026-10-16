@@ -179,3 +179,4 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 .sheet-tools{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}.sheet-tools .btn{font-size:13px;padding:8px 10px}
 @media(max-width:700px){.sheet-bar{padding-right:78px}}
 .rc-h{margin:18px 0 6px;font-size:14px}
+.sh-stock{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}.sh-exp{font-size:10px;font-style:normal;color:#667085}.sh-exp.warn{color:#b54708}.sh-exp.bad{color:#d92d20;font-weight:700}

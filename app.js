@@ -1096,6 +1096,8 @@ const pages = {
     const GROUPS=['Club & small sandwiches','Awal Al Qoutouf','Ezdhar sandwiches','Food Technology','Everything else'];
     const supOf=new Map((state.products||[]).map(p=>[Number(p.id),Number(p.supplier_id)]));
     const grp=id=>{if([53,54,55,19,20,21,22].includes(id))return 0;const sp=supOf.get(id);if(sp===3)return 1;if(sp===2&&id!==46)return 2;if(sp===4)return 3;return 4;};
+    const expMap=new Map();(state.expiry||[]).forEach(x=>{if(!x.expiry_date||Number(x.remaining_quantity)<=0)return;const k=x.product_name,cur=expMap.get(k);if(!cur||x.expiry_date<cur.d)expMap.set(k,{d:x.expiry_date,n:Number(x.days_until_expiry)});});
+    const expOf=name=>{const e=expMap.get(name);return e?`<small class="sh-exp${e.n<=1?' bad':e.n<=3?' warn':''}">exp ${dateFmt(e.d).slice(0,5)}</small>`:'';};
     const rk=n=>{n=String(n).toLowerCase();return /club/.test(n)?0:1;};
     wh.sort((a,b)=>rk(a.name)-rk(b.name)||a.name.localeCompare(b.name));
     const d0=isoToday(),ymd=d0.replace(/-/g,'');
@@ -1105,7 +1107,7 @@ const pages = {
       <label>Reference<input id="shRef" value="TR-${ymd}-01"></label>
       <label class="sh-search">Find<input id="shFind" placeholder="Search item" autocomplete="off"></label></div>
       <div class="sheet-tools"><button class="btn" id="shFill">Fill from last receiving</button><button class="btn" id="shPrint">Print blank</button></div>
-      <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
+      <div class="sheet-list" id="shList">${GROUPS.map((g,i)=>{const items=wh.filter(r=>grp(r.id)===i);return items.length?`<div class="sh-group" data-g="${i}">${g} <small>${items.length}</small></div>`+items.map(r=>`<div class="sh-row${r.stock<=0?' empty':''}" data-id="${r.id}" data-name="${esc(r.name.toLowerCase())}" data-stock="${r.stock}"><span class="sh-name">${esc(r.name)}</span><i class="sh-stock">${qty(r.stock)}${expOf(r.name)}</i><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" ${r.stock<=0?'disabled placeholder="—"':'placeholder="0"'}></div>`).join(''):'';}).join('')}</div>
       <div class="sheet-bar"><div id="shSum">0 lines · 0 pcs</div><button class="btn primary" id="shSave" ${canPost()?'':'disabled'}>Record transfer</button></div></div>`;
     const rows=()=>$$('.sh-row',content);
     const read=()=>rows().map(r=>({row:r,id:Number(r.dataset.id),name:r.querySelector('.sh-name').textContent,stock:Number(r.dataset.stock),q:Number(r.querySelector('.sh-qty').value||0)})).filter(x=>x.q>0);
