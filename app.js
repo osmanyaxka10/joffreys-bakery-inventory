@@ -1033,6 +1033,7 @@ const pages = {
     load();
   },
   async recvsheet(){
+    const findInvoice=async ref=>{const q=c=>supabase.from('receiving').select('id,received_date').eq(c,ref).limit(1);const [a,b]=await Promise.all([q('invoice_no'),q('reference_no')]);return (a.data&&a.data[0])||(b.data&&b.data[0])||null;};
     const rank=n=>{n=String(n).toLowerCase();return /croissant/.test(n)?(/chocolate/.test(n)?3:/plain|butter/.test(n)?0:/white/.test(n)?1:2):/english/.test(n)?10:/muffin/.test(n)?30:/pudding/.test(n)?40:/club/.test(n)?50:/sandwich/.test(n)?60:20;};
     const sups=(state.suppliers||[]).filter(x=>x.is_active!==false);
     const dev=sups.find(x=>/devon/i.test(x.name))||sups[0];
@@ -1066,6 +1067,7 @@ const pages = {
     const restoreR=()=>{try{const o=JSON.parse(localStorage.getItem(rk())||'{}');let n=0;rows().forEach(r=>{const v=o[r.dataset.id];if(v){r.querySelector('.sh-qty').value=v;n++;}});if(n){sum();toast(`Draft restored (${n} items)`);}}catch{}};
     content.addEventListener('input',e=>{const t=e.target;if(t.classList?.contains('rs-cost')){const b=Number(t.dataset.base),v=Number(t.value);const ch=b>0&&Math.abs(v-b)>0.0001;t.classList.toggle('chg',ch);t.title=ch?`Was ${money(b)} (${v>b?'+':'−'}${Math.abs((v-b)/b*100).toFixed(1)}%)`:'';}if(t.closest?.('.rs-row')){sum();if(t.classList.contains('sh-qty'))saveR();}});
     $('#rsPrint').onclick=()=>printBlankSheet('Receiving — '+$('#rsSup').selectedOptions[0].textContent+($('#rsListWrap').classList.contains('hidden')?'':' — '+$('#rsLst').selectedOptions[0].textContent),[{name:'Items',extra:'Cost',items:rows().map(r=>({name:r.querySelector('.sh-name').textContent,extra:r.querySelector('.rs-cost').value}))}]);
+    $('#rsRef').onchange=async()=>{const ref=$('#rsRef').value.trim();$('#rsRef').classList.remove('chg');$('#rsRef').title='';if(!ref)return;try{const hit=await findInvoice(ref);if(hit){$('#rsRef').classList.add('chg');$('#rsRef').title='Already recorded';toast(`Invoice ${ref} is already recorded`,'error');}}catch{}};
     $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
     $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
     $('#rsFind').oninput=()=>{const q=$('#rsFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
@@ -1073,6 +1075,7 @@ const pages = {
       const btn=$('#rsSave'),l=read(),date=$('#rsDate').value,ref=$('#rsRef').value.trim(),sid=Number($('#rsSup').value);
       if(!l.length)return toast('Enter at least one quantity','error');
       if(!ref)return toast('Invoice / reference number is required','error');
+      try{const dup=await findInvoice(ref);if(dup)return toast(`Invoice ${ref} is already recorded${dup.received_date?' ('+dateFmt(dup.received_date)+')':''}. Not recorded again.`,'error');}catch(e){console.warn('dup check',e);}
       if(!date||!sid)return toast('Date and supplier are required','error');
       const bad=l.find(x=>!x.exp||x.exp<date);if(bad)return toast(`Check the expiry date for ${bad.name}`,'error');
       if(!confirm(`Record receiving ${ref}\n${date} · ${l.length} lines · ${l.reduce((a,x)=>a+x.q,0)} pcs · ${money(l.reduce((a,x)=>a+x.q*x.cost,0))}\n${$('#rsSup').selectedOptions[0].textContent} → Warehouse`))return;
