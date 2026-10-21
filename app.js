@@ -838,6 +838,7 @@ const pages = {
     for(const r of receiving){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).inValue+=Number(r.quantity||0);}
     for(const r of transfers){const d=String(r.date||'').slice(0,10);if(!d)continue;if(!dailyMap.has(d))dailyMap.set(d,{label:dateFmt(d),inValue:0,outValue:0});dailyMap.get(d).outValue+=Number(r.quantity||0);}
     const activityTrend=[...dailyMap.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([,x])=>x);
+    state.cache.dashboardTrend = activityTrend;
 
     const [repR,varR,snapR]=await Promise.allSettled([
       supabase.rpc('replenishment_suggestions'),
