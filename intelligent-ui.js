@@ -121,6 +121,14 @@ function makeRiskRows(snapshot) {
     units: row.availablePCS,
     days: 999
   }));
+  (snapshot.outOfStock || []).slice(0,12).forEach(row => rows.push({
+    name: row.product || 'Unnamed product',
+    meta: 'Warehouse out of stock' + (row.sku ? ' · ' + row.sku : ''),
+    status: 'Out of stock',
+    type: 'red',
+    units: 0,
+    days: 1000
+  }));
   return rows.sort((a,b) => a.days - b.days);
 }
 
