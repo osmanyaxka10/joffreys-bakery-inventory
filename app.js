@@ -1,4 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { mountIntelligentDashboard } from './intelligent-ui.js';
 
 const SUPABASE_URL = 'https://ivqygskesdrretwgouea.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_f4Jv-1y826TQkpRbVYAeEg_91xKWGSx';
@@ -1353,7 +1354,7 @@ async function paintTodo(){
     host.prepend(el);el.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   }catch(e){console.warn('todo',e);}
 }
-{const _d=pages.dashboard;pages.dashboard=async function(){const r=await _d.apply(this,arguments);paintTodo();return r;};}
+{const _d=pages.dashboard;pages.dashboard=async function(){const r=await _d.apply(this,arguments);paintTodo();mountIntelligentDashboard({state,supabase,content});return r;};}
 
 
 function groupTransactionDates(rows,kind){
