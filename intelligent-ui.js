@@ -160,6 +160,15 @@ export function mountIntelligentDashboard({ state, supabase, content }) {
   const maxTrend = Math.max(1, ...trendRows.map(row => Math.max(Number(row.inValue||0),Number(row.outValue||0))));
   const trend = trendRows.length ? trendRows.map(row => ({label:row.label, inValue:Number(row.inValue||0),outValue:Number(row.outValue||0)})) : [];
 
+  const trendHtml = trend.length ? `
+    <section class="ji-card">
+      <div class="ji-section-title"><span>Receiving vs transfers</span><span class="ji-kicker">PCS · ${trend.length} active dates</span></div>
+      <div class="ji-legend"><span><i style="background:#2563eb"></i>Received</span><span><i style="background:#dc2626"></i>Transferred</span></div>
+      <div class="ji-spark" role="img" aria-label="Receiving and transfer quantities for recent dates">
+        ${trend.map(row => `<div class="ji-spark-col" title="${esc(row.label)} · Received ${number(row.inValue)} PCS · Transferred ${number(row.outValue)} PCS"><div style="display:flex;align-items:flex-end;gap:3px;height:100%;width:100%;justify-content:center"><div class="ji-spark-bar" style="height:${row.inValue ? Math.max(3, row.inValue / maxTrend * 100) : 0}%;background:#2563eb"></div><div class="ji-spark-bar" style="height:${row.outValue ? Math.max(3, row.outValue / maxTrend * 100) : 0}%;background:#dc2626"></div></div><span>${esc(row.label)}</span></div>`).join('')}
+      </div>
+      <p class="ji-copy">Daily movement from the current dashboard period. This chart is informational only and does not change stock.</p>
+    </section>` : '';
   root.innerHTML = `
     <div class="ji-hero">
       <section class="ji-card">
@@ -181,6 +190,7 @@ export function mountIntelligentDashboard({ state, supabase, content }) {
         </div>
       </section>
     </div>
+    ${trendHtml}
     <div class="ji-body">
       <section class="ji-card">
         <div class="ji-section-title"><span>Priority watchlist</span><span class="ji-kicker">${number((snapshot.expiryRisk||[]).length + low.length + out.length)} flagged records</span></div>
