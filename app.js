@@ -796,6 +796,30 @@ function showDoc(kind,d,back){
   window.scrollTo?.(0,0);
 }
 
+function freeCopilotAnswer(question){
+  const q=String(question||'').trim().toLowerCase();
+  const wh=state.positions.filter(x=>x.branch_name==='Warehouse');
+  const live=state.expiry.filter(x=>Number(x.remaining_quantity)>0);
+  const escv=v=>esc(String(v??'—'));
+  const table=(items,cols)=>items.length?'<div class="copilot-table-wrap"><table class="copilot-table"><thead><tr>'+cols.map(c=>'<th>'+c.label+'</th>').join('')+'</tr></thead><tbody>'+items.map(x=>'<tr>'+cols.map(c=>'<td>'+c.value(x)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p class="muted">No matching records found in the currently loaded data.</p>';
+  if(!q)return '<p>Ask about stock, expiry, receiving, transfers, or a product name.</p>';
+  if(/help|what can|examples|commands/.test(q))return '<p>I can search loaded stock, list low/out-of-stock Warehouse items, show expiry risks, and summarize recent receiving or transfers. I only read data; I never post transactions.</p>';
+  if(/expir|expiry|expire|expired|batch/.test(q)){const data=live.filter(x=>!x.expiry_date||Number(x.days_until_expiry)<=7).sort((a,b)=>{const da=a.expiry_date?Number(a.days_until_expiry):-9999,db=b.expiry_date?Number(b.days_until_expiry):-9999;return da-db;}).slice(0,25);const missing=live.filter(x=>!x.expiry_date);return '<p><strong>'+live.length+'</strong> active batches loaded; <strong>'+missing.length+'</strong> have no expiry date. Showing expired, missing-date, and next-7-day risks first. Verify physical labels before acting.</p>'+table(data,[{label:'Product',value:x=>escv(x.product_name)},{label:'Remaining',value:x=>qty(x.remaining_quantity)},{label:'Expiry',value:x=>escv(x.expiry_date)},{label:'Days left',value:x=>x.expiry_date?escv(x.days_until_expiry):'Missing'}]);}
+  if(/low stock|out of stock|reorder|replenish|shortage/.test(q)){const data=wh.filter(x=>/low stock|out of stock/i.test(x.stock_status||'')).sort((a,b)=>Number(a.available_quantity)-Number(b.available_quantity)).slice(0,30);return '<p><strong>'+data.length+'</strong> Warehouse products are marked low or out of stock in loaded stock-position data. Check thresholds and physical count before replenishing.</p>'+table(data,[{label:'Product',value:x=>escv(x.product_name)},{label:'Available',value:x=>qty(x.available_quantity)},{label:'Status',value:x=>escv(x.stock_status)}]);}
+  if(/receiv|received|supplier/.test(q)){const recent=(state.cache.copilotReceiving||[]).slice(-12).reverse();return '<p>Up to 12 latest receiving report rows loaded for the dashboard (not a posting screen).</p>'+table(recent,[{label:'Date',value:x=>escv(String(x.date||'').slice(0,10))},{label:'Supplier',value:x=>escv(x.supplier_name)},{label:'Document',value:x=>escv(x.receiving_id)},{label:'Qty',value:x=>qty(x.quantity)}]);}
+  if(/transfer|sent|branch|movement/.test(q)){const recent=(state.cache.copilotTransfers||[]).slice(-12).reverse();return '<p>Up to 12 latest transfer report rows loaded for the dashboard. Confirm document details in Transfers before action.</p>'+table(recent,[{label:'Date',value:x=>escv(String(x.date||'').slice(0,10))},{label:'Destination',value:x=>escv(x.to_branch)},{label:'Document',value:x=>escv(x.transfer_id)},{label:'Qty',value:x=>qty(x.quantity)}]);}
+  const terms=q.split(/\s+/).filter(x=>x.length>1);const data=wh.filter(x=>terms.some(t=>String(x.product_name||'').toLowerCase().includes(t))).slice(0,20);const batch=live.filter(x=>terms.some(t=>String(x.product_name||'').toLowerCase().includes(t))).slice(0,15);
+  if(!data.length&&!batch.length)return '<p>No matching product found in currently loaded Warehouse stock or expiry data. Try a shorter name, or ask about <em>low stock</em>, <em>expiry</em>, <em>receiving</em>, or <em>transfers</em>.</p>';
+  return (data.length?'<p><strong>Warehouse stock matches</strong></p>'+table(data,[{label:'Product',value:x=>escv(x.product_name)},{label:'Available',value:x=>qty(x.available_quantity)},{label:'Status',value:x=>escv(x.stock_status)}]):'')+(batch.length?'<p><strong>Expiry batch matches</strong></p>'+table(batch,[{label:'Product',value:x=>escv(x.product_name)},{label:'Remaining',value:x=>qty(x.remaining_quantity)},{label:'Expiry',value:x=>escv(x.expiry_date||'Missing')} ]):'');
+}
+function mountFreeCopilot(receiving,transfers){
+  state.cache.copilotReceiving=receiving||[];state.cache.copilotTransfers=transfers||[];
+  const old=$('#freeCopilot');if(old)old.remove();
+  content.insertAdjacentHTML('beforeend','<section id="freeCopilot" class="free-copilot"><div class="copilot-head"><div><span class="copilot-kicker">FREE · READ-ONLY</span><h3>Bakery Copilot</h3><p>Ask about loaded inventory data. No AI API or transaction posting.</p></div><span class="copilot-mark">✦</span></div><form id="copilotForm" class="copilot-form"><input id="copilotQuestion" type="search" autocomplete="off" placeholder="Try: low stock, expiry, receiving, transfers, or product name" aria-label="Ask Bakery Copilot"/><button type="submit">Ask</button></form><div class="copilot-prompts"><button type="button" data-copilot-prompt="low stock">Low stock</button><button type="button" data-copilot-prompt="expiry">Expiry risks</button><button type="button" data-copilot-prompt="receiving">Recent receiving</button><button type="button" data-copilot-prompt="transfers">Recent transfers</button></div><div id="copilotAnswer" class="copilot-answer" aria-live="polite"><p>Choose a question to get a read-only answer from the dashboard data.</p></div><p class="copilot-footnote">Answers reflect data currently loaded by this page; verify the source document and physical stock before acting.</p></section>');
+  const ask=q=>{const box=$('#copilotAnswer');if(box)box.innerHTML=freeCopilotAnswer(q);};
+  $('#copilotForm')?.addEventListener('submit',e=>{e.preventDefault();ask($('#copilotQuestion')?.value||'');});
+  $('#freeCopilot [data-copilot-prompt]').forEach(b=>b.addEventListener('click',()=>{const q=b.dataset.copilotPrompt;$('#copilotQuestion').value=q;ask(q);}));
+}
 const pages = {
   async dashboard(){
     ensureDashboardProStyles();
@@ -891,7 +915,8 @@ const pages = {
       ${dualTrendChart('Receiving vs Transfer — Daily Units',activityTrend,'Receiving','Transfer','#dc2626')}
       <div class="chart-grid">${barChart('Top 10 products by stock value',topValue,COLORS.neutral,money)}${barChart('Top 10 products by quantity',topQty,COLORS.neutral,qty)}</div>
     `;
-    $$('.action-card[data-go]').forEach(b=>b.onclick=()=>b.dataset.exp?openExpiryQuick(b.dataset.exp):go(b.dataset.go));
+    mountFreeCopilot(receiving,transfers);
+    $('.action-card[data-go]').forEach(b=>b.onclick=()=>b.dataset.exp?openExpiryQuick(b.dataset.exp):go(b.dataset.go));
     const warnings=[...(state.dataWarnings||[]),...dashboardWarnings];
     if(warnings.length)toast('Dashboard loaded with limited data: '+warnings.join(' | '),'error');
   },
