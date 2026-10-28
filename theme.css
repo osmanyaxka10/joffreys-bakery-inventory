@@ -182,3 +182,16 @@ rect.mo-r,i.mo-r{fill:#2563eb;background:#2563eb}rect.mo-t,i.mo-t{fill:#f59e0b;b
 .sh-stock{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}.sh-exp{font-size:10px;font-style:normal;color:#667085}.sh-exp.warn{color:#b54708}.sh-exp.bad{color:#d92d20;font-weight:700}
 .sh-group[data-g="0"]{background:#fef3f2;color:#b42318}
 #rsRef.chg{border-color:#d92d20!important;background:#fff1f0}
+
+/* pro polish: compact table toolbar on phones */
+.tb-toggle{display:none}
+@media(max-width:700px){
+  .table-toolbar .table-filter{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+  .table-toolbar .table-filter input[data-search]{flex:1 1 0;min-width:0}
+  .tb-toggle{display:inline-flex;flex:0 0 auto}
+  .table-toolbar:not(.open) .table-filter select,.table-toolbar:not(.open) .table-actions{display:none}
+  .table-toolbar.open .table-filter select{flex:1 1 100%}
+}
+/* sticky header and clearer rows */
+.data-table thead th{position:sticky;top:0;z-index:2}
+.data-table tbody tr:hover td{background:#f4f8ff}
