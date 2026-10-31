@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { analyticsIdentify, analyticsReset, analyticsTrack } from './analytics.js';
+import { analyticsIdentify, analyticsReset, analyticsTrack, analyticsError } from './analytics.js';
 
 const SUPABASE_URL = 'https://ivqygskesdrretwgouea.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_f4Jv-1y826TQkpRbVYAeEg_91xKWGSx';
@@ -218,7 +218,7 @@ function renderNav(){
 async function go(page,throwOnError=false){
   state.currentPage=page;renderNav();$('#sidebar').classList.remove('open');
   const meta=pageMeta[page]||['Inventory',''];$('#pageTitle').textContent=meta[0];$('#pageSubtitle').textContent=meta[1];paintCrumb(page);paintHealth();setLoading();
-  try{await requireData();await pages[page]();analyticsTrack('bakery_page_view',{page});return true;}catch(e){if(throwOnError)throw e;fail(e);content.innerHTML=`<div class="panel"><h3>Unable to load ${esc(meta[0])}</h3><p class="muted">${esc(e.message)}</p></div>`;return false;}
+  try{await requireData();await pages[page]();analyticsTrack('bakery_page_view',{page});return true;}catch(e){analyticsError(e,{page,source:'bakery_app'});if(throwOnError)throw e;fail(e);content.innerHTML=`<div class="panel"><h3>Unable to load ${esc(meta[0])}</h3><p class="muted">${esc(e.message)}</p></div>`;return false;}
 }
 
 function kpi(label,value,hint,cls=''){return `<div class="kpi-card ${cls}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value??'—'}</div><div class="kpi-hint">${esc(hint||'')}</div></div>`;}
