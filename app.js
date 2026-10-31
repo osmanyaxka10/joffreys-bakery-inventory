@@ -1474,9 +1474,20 @@ function syncReceivingSupplier(container,supplierId){
 function syncReceivingExpiryMin(container,receivedDate){
   $$('.li-expiry',container).forEach(input=>{input.min=receivedDate||INVENTORY_START_DATE;if(input.value&&receivedDate&&input.value<receivedDate)input.value='';});
 }
-function bindTransferLines(container,stockMap){
-  $$('[data-line]',container).forEach(row=>{if(row.dataset.bound)return;row.dataset.bound='1';const sel=$('.li-product',row),q=$('.li-qty',row),cost=$('.li-cost',row),value=$('.li-value',row),available=$('.li-available',row),sku=$('.li-sku',row),meta=$('.li-meta',row);$('.line-remove',row).onclick=()=>{if($$('[data-line]',container).length>1)row.remove();};const calc=()=>value.value=money(Number(q.value||0)*Number(cost.value||0));sel.onchange=()=>{const p=state.products.find(x=>String(x.id)===sel.value),pos=stockMap.get(Number(sel.value));if(p){sku.value=p.ref||p.sku||p.code||'';cost.value=Number(p.unit_cost||0).toFixed(2);meta.textContent=`${p.category||'Uncategorized'} · ${p.unit||'PCS'}`;}available.value=qty(pos?.available_quantity||0);calc();};q.oninput=calc;});
+function transferBatchHint(productId){
+  const batches=(state.expiry||[]).filter(x=>Number(x.product_id)===Number(productId)&&Number(x.branch_id)===Number(state.warehouse?.id)&&Number(x.remaining_quantity)>0)
+    .sort((a,b)=>String(a.expiry_date||'9999-12-31').localeCompare(String(b.expiry_date||'9999-12-31'))||String(a.batch_no||'').localeCompare(String(b.batch_no||'')));
+  if(!batches.length)return 'No batch breakdown available · server validates stock';
+  const dated=batches.filter(x=>x.expiry_date),missing=batches.filter(x=>!x.expiry_date);
+  const preview=dated.slice(0,2).map(x=>`${qty(x.remaining_quantity)} exp ${dateFmt(x.expiry_date)}`).join(' · ');
+  const more=dated.length>2?` · +${dated.length-2} batches`:'';
+  const noDate=missing.length?` · ${qty(missing.reduce((n,x)=>n+Number(x.remaining_quantity||0),0))} missing expiry`:'';
+  return `FEFO batch view: ${preview||'No dated batches'}${more}${noDate} · allocation confirmed by server`;
 }
+function bindTransferLines(container,stockMap){
+  $$('[data-line]',container).forEach(row=>{if(row.dataset.bound)return;row.dataset.bound='1';const sel=$('.li-product',row),q=$('.li-qty',row),cost=$('.li-cost',row),value=$('.li-value',row),available=$('.li-available',row),sku=$('.li-sku',row),meta=$('.li-meta',row);$('.line-remove',row).onclick=()=>{if($$('[data-line]',container).length>1)row.remove();};const calc=()=>value.value=money(Number(q.value||0)*Number(cost.value||0));sel.onchange=()=>{const p=state.products.find(x=>String(x.id)===sel.value),pos=stockMap.get(Number(sel.value));if(p){sku.value=p.ref||p.sku||p.code||'';cost.value=Number(p.unit_cost||0).toFixed(2);meta.textContent=`${p.category||'Uncategorized'} · ${p.unit||'PCS'} · ${transferBatchHint(p.id)}`;}available.value=qty(pos?.available_quantity||0);calc();};q.oninput=calc;});
+}
+
 function validateUniqueProducts(rows){const ids=rows.map(r=>Number($('.li-product',r)?.value)).filter(Boolean);if(new Set(ids).size!==ids.length)throw new Error('Duplicate product line');}
 function calculateReceiving(container){for(const row of $$('[data-line]',container)){const q=Number($('.li-qty',row).value||0),c=Number($('.li-cost',row).value||0);$('.li-value',row).value=money(q*c);}}
 function calculateTransfer(container){for(const row of $$('[data-line]',container)){const q=Number($('.li-qty',row).value||0),c=Number($('.li-cost',row).value||0);$('.li-value',row).value=money(q*c);}}
