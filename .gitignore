@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Generated PostHog runtime config (built from Vercel environment variables)
+posthog-config.js
