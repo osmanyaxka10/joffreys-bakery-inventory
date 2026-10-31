@@ -50,3 +50,8 @@ export async function analyticsTrack(event, properties = {}) {
   const ph = await getClient();
   if (ph) ph.capture(event, properties);
 }
+
+export async function analyticsError(error, properties = {}) {
+  const ph = await getClient();
+  if (ph && error) ph.captureException(error, properties);
+}
