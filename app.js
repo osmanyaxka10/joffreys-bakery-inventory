@@ -1040,6 +1040,9 @@ const pages = {
     const dev=sups.find(x=>/devon/i.test(x.name))||sups[0];
     const d0=isoToday();
     const addDays=(iso,n)=>{const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+    const lagMap=new Map();const LAG=id=>lagMap.get(Number(id))||6;
+    try{const {data}=await supabase.from('v_daily_receiving_report').select('date,product_id,expiry_date').eq('branch_id',1).order('date',{ascending:false}).limit(4000);
+      for(const r of data||[]){const id=Number(r.product_id);if(lagMap.has(id)||!r.expiry_date||!r.date)continue;const n=Math.round((new Date(String(r.expiry_date).slice(0,10)+'T00:00:00Z')-new Date(String(r.date).slice(0,10)+'T00:00:00Z'))/864e5);if(n>=1&&n<=1000)lagMap.set(id,n);}}catch(e){console.warn('shelf life',e);}
     content.innerHTML=`<div class="panel sheet-panel"><div class="sheet-top">
       <label>Date<input type="date" id="rsDate" value="${esc(d0)}" max="${esc(d0)}"></label>
       <label>Supplier<select id="rsSup">${sups.map(x=>`<option value="${x.id}" ${dev&&x.id===dev.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
@@ -1057,7 +1060,7 @@ const pages = {
       let list=(state.products||[]).filter(p=>Number(p.supplier_id)===sid);
       if(isDevon)list=list.filter(p=>(SMALL.includes(Number(p.id))?'small':'big')===ls.value);
       list.sort((a,b)=>rank(a.name)-rank(b.name)||String(a.name).localeCompare(b.name));
-      $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" data-base="${Number(p.unit_cost||0)}" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,6)}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
+      $('#rsList').innerHTML=list.length?`<div class="rs-head"><span>Item</span><span>Cost</span><span>Expiry</span><span>Qty</span></div>`+list.map(p=>`<div class="sh-row rs-row" data-id="${p.id}" data-name="${esc(String(p.name).toLowerCase())}"><span class="sh-name">${esc(p.name)}</span><input class="rs-cost" data-base="${Number(p.unit_cost||0)}" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(p.unit_cost||0)}"><input class="rs-exp" type="date" value="${addDays(date,LAG(p.id))}"><input class="sh-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>`).join(''):'<p class="muted">No products for this supplier.</p>';
       sum();restoreR();
     };
     const rows=()=>$$('.rs-row',content);
@@ -1070,7 +1073,7 @@ const pages = {
     $('#rsPrint').onclick=()=>printBlankSheet('Receiving — '+$('#rsSup').selectedOptions[0].textContent+($('#rsListWrap').classList.contains('hidden')?'':' — '+$('#rsLst').selectedOptions[0].textContent),[{name:'Items',extra:'Cost',items:rows().map(r=>({name:r.querySelector('.sh-name').textContent,extra:r.querySelector('.rs-cost').value}))}]);
     $('#rsRef').onchange=async()=>{const ref=$('#rsRef').value.trim();$('#rsRef').classList.remove('chg');$('#rsRef').title='';if(!ref)return;try{const hit=await findInvoice(ref);if(hit){$('#rsRef').classList.add('chg');$('#rsRef').title='Already recorded';toast(`Invoice ${ref} is already recorded`,'error');}}catch{}};
     $('#rsSup').onchange=paint;$('#rsLst').onchange=paint;
-    $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,6);});};
+    $('#rsDate').onchange=()=>{const dt=$('#rsDate').value;if(!dt)return;rows().forEach(r=>{if(!Number(r.querySelector('.sh-qty').value||0))r.querySelector('.rs-exp').value=addDays(dt,LAG(r.dataset.id));});};
     $('#rsFind').oninput=()=>{const q=$('#rsFind').value.trim().toLowerCase();rows().forEach(r=>r.classList.toggle('hidden',!!q&&!r.dataset.name.includes(q)));};
     $('#rsSave').onclick=async()=>{
       const btn=$('#rsSave'),l=read(),date=$('#rsDate').value,ref=$('#rsRef').value.trim(),sid=Number($('#rsSup').value);
